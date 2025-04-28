@@ -1,0 +1,161 @@
+const express = require('express');
+const router = express.Router();
+const mongoose = require('mongoose');
+const { authenticate } = require('../middleware/auth');
+
+/**
+ * GlobalQuery - Servicio de consulta global para administradores
+ * Permite consultar cualquier modelo con filtros, ordenamientos y paginación
+ */
+
+/**
+ * Middleware para verificar permisos de administrador
+ */
+const verifyAdmin = (req, res, next) => {
+  if (!req.user || req.user.role !== 'admin') {
+    return res.status(403).json({ message: 'Acceso denegado. Se requieren permisos de administrador.' });
+  }
+  next();
+};
+
+/**
+ * Obtener todos los modelos disponibles en la base de datos
+ * @route GET /api/global-query/models
+ * @access Admin
+ */
+router.get('/models', authenticate, verifyAdmin, async (req, res) => {
+  try {
+    // Obtener todos los modelos registrados en mongoose
+    const modelNames = mongoose.modelNames();
+    
+    // Formatear la respuesta con información de cada modelo
+    const models = modelNames.map(name => {
+      const model = mongoose.model(name);
+      const schema = model.schema;
+      
+      // Extraer información de los campos del esquema
+      const fields = Object.keys(schema.paths).map(pathName => {
+        const path = schema.paths[pathName];
+        return {
+          name: pathName,
+          type: path.instance,
+          required: path.isRequired || false
+        };
+      });
+      
+      return {
+        name,
+        fields,
+        endpoint: `/api/global-query/${name.toLowerCase()}`
+      };
+    });
+    
+    return res.status(200).json(models);
+  } catch (error) {
+    console.error('Error al obtener modelos:', error);
+    return res.status(500).json({ message: 'Error interno del servidor' });
+  }
+});
+
+/**
+ * Consultar documentos de un modelo específico
+ * @route GET /api/global-query/:modelName
+ * @access Admin
+ */
+router.get('/:modelName', authenticate, verifyAdmin, async (req, res) => {
+  try {
+    const { modelName } = req.params;
+    
+    // Verificar que el modelo exista
+    if (!mongoose.modelNames().includes(modelName)) {
+      return res.status(404).json({ message: `Modelo ${modelName} no encontrado` });
+    }
+    
+    const Model = mongoose.model(modelName);
+    
+    // Configurar paginación
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+    
+    // Configurar filtros
+    let filter = {};
+    if (req.query.filter) {
+      try {
+        filter = JSON.parse(req.query.filter);
+      } catch (error) {
+        return res.status(400).json({ message: 'Formato de filtro inválido' });
+      }
+    }
+    
+    // Configurar ordenamiento
+    let sort = {};
+    if (req.query.sort) {
+      try {
+        sort = JSON.parse(req.query.sort);
+      } catch (error) {
+        return res.status(400).json({ message: 'Formato de ordenamiento inválido' });
+      }
+    }
+    
+    // Contar total de documentos para la paginación
+    const total = await Model.countDocuments(filter);
+    
+    // Ejecutar la consulta
+    const documents = await Model.find(filter)
+      .sort(sort)
+      .skip(skip)
+      .limit(limit);
+    
+    return res.status(200).json({
+      data: documents,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit)
+      }
+    });
+  } catch (error) {
+    console.error(`Error al consultar modelo ${req.params.modelName}:`, error);
+    return res.status(500).json({ message: 'Error interno del servidor' });
+  }
+});
+
+/**
+ * Obtener un documento por ID
+ * @route GET /api/global-query/:modelName/:id
+ * @access Admin
+ */
+router.get('/:modelName/:id', authenticate, verifyAdmin, async (req, res) => {
+  try {
+    const { modelName, id } = req.params;
+    
+    // Verificar que el modelo exista
+    if (!mongoose.modelNames().includes(modelName)) {
+      return res.status(404).json({ message: `Modelo ${modelName} no encontrado` });
+    }
+    
+    const Model = mongoose.model(modelName);
+    
+    // Validar que el ID sea un ObjectId válido
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: 'ID inválido' });
+    }
+    
+    const document = await Model.findById(id);
+    
+    if (!document) {
+      return res.status(404).json({ message: `Documento no encontrado en ${modelName}` });
+    }
+    
+    return res.status(200).json(document);
+  } catch (error) {
+    console.error(`Error al obtener documento de ${req.params.modelName}:`, error);
+    return res.status(500).json({ message: 'Error interno del servidor' });
+  }
+});
+
+// [IA_GENERATED_CODE]
+
+module.exports = router;

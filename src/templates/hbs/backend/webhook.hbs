@@ -1,0 +1,103 @@
+const express = require('express');
+const router = express.Router();
+const crypto = require('crypto');
+{{#if requiresAuth}}
+const { authenticate } = require('../middleware/auth');
+{{/if}}
+
+/**
+ * Webhooks para {{serviceName}}
+ * {{description}}
+ */
+
+{{#if verificationToken}}
+// Secret para verificar webhooks
+const WEBHOOK_SECRET = process.env.{{serviceName.toUpperCase()}}_WEBHOOK_SECRET;
+{{/if}}
+
+/**
+ * Verifica la firma del webhook
+ * @param {Object} req - Solicitud Express
+ * @param {string} payload - Cuerpo de la solicitud en formato string
+ * @returns {boolean} - true si la firma es válida
+ */
+function verifySignature(req, payload) {
+  {{#if signatureMethod === 'hmac'}}
+  const signature = req.headers['{{signatureHeader}}'];
+  const hmac = crypto.createHmac('{{hashAlgorithm}}', WEBHOOK_SECRET)
+    .update(payload)
+    .digest('{{digestFormat}}');
+  return crypto.timingSafeEqual(
+    Buffer.from(signature),
+    Buffer.from('{{signaturePrefix}}' + hmac)
+  );
+  {{else if signatureMethod === 'token'}}
+  const token = req.query.token || req.headers['{{signatureHeader}}'];
+  return token === WEBHOOK_SECRET;
+  {{else}}
+  // Sin verificación de firma
+  return true;
+  {{/if}}
+}
+
+/**
+ * Procesa webhooks entrantes de {{serviceName}}
+ * @route POST /api/webhooks/{{serviceName.toLowerCase()}}
+ * @access Public
+ */
+router.post('/{{serviceName.toLowerCase()}}', async (req, res) => {
+  try {
+    {{#if verificationToken}}
+    // Verificar la firma del webhook
+    const rawBody = JSON.stringify(req.body);
+    if (!verifySignature(req, rawBody)) {
+      console.error('Firma de webhook inválida');
+      return res.status(401).json({ message: 'Firma inválida' });
+    }
+    {{/if}}
+
+    {{#if challenge}}
+    // Responder al desafío de verificación
+    if (req.query['{{challengeParam}}']) {
+      return res.status(200).send(req.query['{{challengeParam}}']);
+    }
+    {{/if}}
+    
+    // Extraer datos del webhook
+    const eventType = req.body.{{eventTypeField}};
+    const payload = req.body;
+    
+    console.log(`Webhook recibido de {{serviceName}}: ${eventType}`);
+    
+    // Procesar diferentes tipos de eventos
+    switch (eventType) {
+      {{#each eventTypes}}
+      case '{{this.type}}':
+        // Procesar evento {{this.name}}
+        await handle{{this.name}}(payload);
+        break;
+      {{/each}}
+      default:
+        console.log(`Tipo de evento desconocido: ${eventType}`);
+    }
+    
+    return res.status(200).json({ success: true });
+  } catch (error) {
+    console.error(`Error al procesar webhook de {{serviceName}}:`, error);
+    return res.status(500).json({ message: 'Error interno del servidor' });
+  }
+});
+
+{{#each eventTypes}}
+/**
+ * Maneja eventos de tipo {{this.name}}
+ * @param {Object} payload - Datos del evento
+ */
+async function handle{{this.name}}(payload) {
+  // Implementación específica para este tipo de evento
+}
+{{/each}}
+
+// [IA_GENERATED_CODE]
+
+module.exports = router;

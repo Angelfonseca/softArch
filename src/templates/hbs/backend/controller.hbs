@@ -1,0 +1,99 @@
+const {{modelName}} = require('../models/{{modelFileName}}');
+
+/**
+ * Controlador para {{modelName}}
+ */
+const {{modelName}}Controller = {
+  /**
+   * Obtener todos los {{modelName}}
+   * @param {Object} req - Request de Express
+   * @param {Object} res - Response de Express
+   */
+  getAll: async (req, res) => {
+    try {
+      const items = await {{modelName}}.find({});
+      return res.status(200).json(items);
+    } catch (error) {
+      console.error('Error al obtener {{modelName}}:', error);
+      return res.status(500).json({ message: 'Error interno del servidor' });
+    }
+  },
+
+  /**
+   * Obtener un {{modelName}} por ID
+   * @param {Object} req - Request de Express
+   * @param {Object} res - Response de Express
+   */
+  getById: async (req, res) => {
+    try {
+      const item = await {{modelName}}.findById(req.params.id);
+      if (!item) {
+        return res.status(404).json({ message: '{{modelName}} no encontrado' });
+      }
+      return res.status(200).json(item);
+    } catch (error) {
+      console.error('Error al obtener {{modelName}}:', error);
+      return res.status(500).json({ message: 'Error interno del servidor' });
+    }
+  },
+
+  /**
+   * Crear un nuevo {{modelName}}
+   * @param {Object} req - Request de Express
+   * @param {Object} res - Response de Express
+   */
+  create: async (req, res) => {
+    try {
+      const newItem = new {{modelName}}(req.body);
+      const savedItem = await newItem.save();
+      return res.status(201).json(savedItem);
+    } catch (error) {
+      console.error('Error al crear {{modelName}}:', error);
+      return res.status(500).json({ message: 'Error interno del servidor' });
+    }
+  },
+
+  /**
+   * Actualizar un {{modelName}} existente
+   * @param {Object} req - Request de Express
+   * @param {Object} res - Response de Express
+   */
+  update: async (req, res) => {
+    try {
+      const updatedItem = await {{modelName}}.findByIdAndUpdate(
+        req.params.id,
+        req.body,
+        { new: true, runValidators: true }
+      );
+      if (!updatedItem) {
+        return res.status(404).json({ message: '{{modelName}} no encontrado' });
+      }
+      return res.status(200).json(updatedItem);
+    } catch (error) {
+      console.error('Error al actualizar {{modelName}}:', error);
+      return res.status(500).json({ message: 'Error interno del servidor' });
+    }
+  },
+
+  /**
+   * Eliminar un {{modelName}}
+   * @param {Object} req - Request de Express
+   * @param {Object} res - Response de Express
+   */
+  delete: async (req, res) => {
+    try {
+      const deletedItem = await {{modelName}}.findByIdAndDelete(req.params.id);
+      if (!deletedItem) {
+        return res.status(404).json({ message: '{{modelName}} no encontrado' });
+      }
+      return res.status(200).json({ message: '{{modelName}} eliminado con éxito' });
+    } catch (error) {
+      console.error('Error al eliminar {{modelName}}:', error);
+      return res.status(500).json({ message: 'Error interno del servidor' });
+    }
+  },
+  
+  // [IA_GENERATED_CODE]
+};
+
+module.exports = {{modelName}}Controller;

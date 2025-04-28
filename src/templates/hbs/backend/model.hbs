@@ -1,0 +1,38 @@
+const mongoose = require('mongoose');
+
+const {{modelName}}Schema = new mongoose.Schema({
+  {{#each fields}}
+  {{name}}: {
+    type: {{type}},
+    {{#if required}}required: true,{{/if}}
+    {{#if unique}}unique: true,{{/if}}
+    {{#if default}}default: {{{default}}},{{/if}}
+  },
+  {{/each}}
+}, { 
+  timestamps: true 
+});
+
+{{#if methods.length}}
+// Métodos del modelo
+{{#each methods}}
+{{modelName}}Schema.methods.{{name}} = function() {
+  {{{implementation}}}
+};
+{{/each}}
+{{/if}}
+
+{{#if statics.length}}
+// Métodos estáticos
+{{#each statics}}
+{{modelName}}Schema.statics.{{name}} = function() {
+  {{{implementation}}}
+};
+{{/each}}
+{{/if}}
+
+// [IA_GENERATED_CODE]
+
+const {{modelName}} = mongoose.model('{{modelName}}', {{modelName}}Schema);
+
+module.exports = {{modelName}};

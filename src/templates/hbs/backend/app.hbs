@@ -1,0 +1,36 @@
+const express = require('express');
+const mongoose = require('mongoose');
+const cors = require('cors');
+require('dotenv').config();
+
+const app = express();
+
+// Middleware
+app.use(cors());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// Configuración de conexión a la base de datos
+mongoose.connect(process.env.MONGODB_URI)
+  .then(() => console.log('Conexión a MongoDB establecida'))
+  .catch(err => console.error('Error al conectar a MongoDB:', err));
+
+// Rutas
+{{#each routes}}
+app.use('/api/{{path}}', require('./routes/{{file}}'));
+{{/each}}
+
+// Manejo de errores
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).json({ message: 'Error interno del servidor' });
+});
+
+// [IA_GENERATED_CODE]
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Servidor ejecutándose en el puerto ${PORT}`);
+});
+
+module.exports = app;
