@@ -84,6 +84,8 @@ program
   .option('--use-templates', 'Usar plantillas CRUD predefinidas', true)
   .option('--zip', 'Generar archivo ZIP del proyecto', true)
   .option('--edit', 'Permitir edición manual antes de finalizar', false)
+  .option('--continue-on-error', 'Continuar generación si hay errores', true)
+  .option('--skip-mongodb', 'No guardar en MongoDB, solo en archivo local', false)
   .action(async (description, options) => {
     try {
       // Asegurar que se usa el nombre del proyecto dentro de la carpeta output
@@ -97,6 +99,8 @@ program
       console.log(`Usando plantillas CRUD: ${options.useTemplates ? 'Sí' : 'No'}`);
       console.log(`Generar ZIP: ${options.zip ? 'Sí' : 'No'}`);
       console.log(`Permitir edición previa: ${options.edit ? 'Sí' : 'No'}`);
+      console.log(`Continuar en caso de error: ${options.continueOnError ? 'Sí' : 'No'}`);
+      console.log(`Usar MongoDB: ${!options.skipMongodb ? 'Sí' : 'No'}`);
       
       // Asegurar que la carpeta output existe
       await fs.ensureDir(baseOutputPath);
@@ -109,20 +113,36 @@ program
         includeGlobalQuery: options.globalQuery,
         useTemplates: options.useTemplates,
         generateZip: options.zip,
-        allowPreviewEdit: options.edit
+        allowPreviewEdit: options.edit,
+        continueOnError: options.continueOnError,
+        skipMongodb: options.skipMongodb
       });
       
-      console.log(`\n🎉 Proyecto completo generado con éxito!`);
-      console.log(`📁 Ubicación: ${outputPath}`);
-      
-      if (result.zipPath) {
-        console.log(`🗜️ Archivo ZIP: ${result.zipPath}`);
-        console.log('  Puedes descargar este archivo para compartir el proyecto completo.');
+      if (result.success) {
+        console.log(`\n🎉 Proyecto completo generado con éxito!`);
+        console.log(`📁 Ubicación: ${outputPath}`);
+        
+        if (result.zipPath) {
+          console.log(`🗜️ Archivo ZIP: ${result.zipPath}`);
+          console.log('  Puedes descargar este archivo para compartir el proyecto completo.');
+        }
+        
+        if (result.diagramId) {
+          console.log(`🗄️ Diagrama guardado en MongoDB con ID: ${result.diagramId}`);
+        } else if (!options.skipMongodb) {
+          console.log(`⚠️ No se pudo guardar el diagrama en MongoDB, pero el proyecto se generó correctamente.`);
+          if (fs.existsSync(path.join(outputPath, 'diagram.json'))) {
+            console.log(`📊 Se guardó una copia local del diagrama en: ${path.join(outputPath, 'diagram.json')}`);
+          }
+        }
+      } else {
+        console.log(`\n⚠️ La generación del proyecto se completó con advertencias.`);
+        console.log(`📁 Los archivos generados están disponibles en: ${outputPath}`);
+        console.log(`Para continuar la generación, vuelve a ejecutar el mismo comando.`);
       }
-      
-      console.log(`🗄️ Diagrama guardado en MongoDB con ID: ${result.diagramId}`);
     } catch (error) {
       console.error('Error al generar el proyecto completo:', error);
+      console.log('\nPara intentar recuperar la generación, ejecuta el mismo comando nuevamente.');
       process.exit(1);
     }
   });

@@ -335,43 +335,95 @@ class ProjectGenerator {
    */
   async generateCompleteProject(description, outputPath, options = {}) {
     try {
+      // Intentar cargar el estado de recuperación si existe
+      const recoveryPath = path.join(outputPath, '.recovery.json');
+      let recoveryState = null;
+      let architecture = null;
+      let fileCounter = 0;
+      let continueGeneration = false;
+      let generatedFiles = [];
+      
+      if (await fs.pathExists(recoveryPath)) {
+        try {
+          recoveryState = JSON.parse(await fs.readFile(recoveryPath, 'utf8'));
+          console.log('\n🔄 Detectado estado de recuperación. ¿Desea continuar la generación interrumpida?');
+          console.log(`   Proyecto: ${recoveryState.projectName}`);
+          console.log(`   Progreso: ${recoveryState.fileCounter}/${recoveryState.totalFiles} archivos generados`);
+          
+          // En una implementación real, aquí preguntaríamos al usuario
+          // Por ahora, asumiremos que sí quiere continuar
+          continueGeneration = true;
+          
+          if (continueGeneration) {
+            console.log('\n✅ Continuando la generación desde el punto de interrupción...');
+            architecture = recoveryState.architecture;
+            fileCounter = recoveryState.fileCounter;
+            generatedFiles = recoveryState.generatedFiles || [];
+          } else {
+            console.log('\n🔄 Comenzando nueva generación. Se ignorará el estado anterior...');
+            await fs.remove(recoveryPath);
+          }
+        } catch (error) {
+          console.warn('Error al leer el archivo de recuperación:', error.message);
+          console.log('Comenzando nueva generación...');
+        }
+      }
+      
       console.log('\n🚀 Iniciando generación de proyecto completo...');
       console.log(`📝 Nombre: "${options.name || path.basename(outputPath)}"`);
       console.log(`📋 Descripción: "${description}"`);
       
-      // FASE 1: Generar y validar la arquitectura JSON antes de crear archivos
-      console.log('\n📊 Fase 1: Analizando requisitos y generando estructura JSON...');
-      
-      // Generar arquitectura JSON basada en la descripción
-      const architecturePrompt = `
-        Genera una arquitectura de backend para una API con las siguientes características:
-        - Base de datos: ${options.database || 'MongoDB'}
-        - Framework: ${options.framework || 'Express'}
-        - Autenticación: ${options.auth || 'JWT'}
-        - Descripción: ${description}
+      // FASE 1: Generar y validar la arquitectura JSON antes de crear archivos (si no estamos recuperando)
+      if (!architecture) {
+        console.log('\n📊 Fase 1: Analizando requisitos y generando estructura JSON...');
         
-        Debe incluir modelos, controladores, rutas, middleware, y configuración de base de datos.
-        El proyecto debe estar listo para uso y despliegue inmediato.
-        Incluye instrucciones de instalación y configuración en un README.md.
-        Incluye un archivo package.json con todas las dependencias necesarias.
-        Proporciona un archivo .env.example con las variables de entorno necesarias.
-        ${options.includeGlobalQuery ? 'Incluye un archivo de consulta global (globalQuery.js) en la carpeta de rutas.' : ''}
+        const architecturePrompt = `
+          Genera una arquitectura de backend para una API con las siguientes características:
+          - Base de datos: ${options.database || 'MongoDB'}
+          - Framework: ${options.framework || 'Express'}
+          - Autenticación: ${options.auth || 'JWT'}
+          - Descripción: ${description}
+          
+          Debe incluir modelos, controladores, rutas, middleware, y configuración de base de datos.
+          El proyecto debe estar listo para uso y despliegue inmediato.
+          Incluye instrucciones de instalación y configuración en un README.md.
+          Incluye un archivo package.json con todas las dependencias necesarias.
+          Proporciona un archivo .env.example con las variables de entorno necesarias.
+          ${options.includeGlobalQuery ? 'Incluye un archivo de consulta global (globalQuery.js) en la carpeta de rutas.' : ''}
 
-        Responde ÚNICAMENTE con un objeto JSON.
-      `;
+          Responde ÚNICAMENTE con un objeto JSON.
+        `;
+        
+        console.log('🧠 Consultando al modelo de IA para diseñar la arquitectura...');
+        console.log('   (Este proceso puede tardar hasta 30 segundos)');
+        
+        try {
+          architecture = await this.agent.generateArchitecture(architecturePrompt);
+          architecture = await this.agent.validateArchitecture(architecture, description);
+        } catch (error) {
+          console.error('\n❌ Error al generar arquitectura:', error.message);
+          console.log('Intentando cargar arquitectura predeterminada...');
+          architecture = this._getDefaultArchitecture(description, options);
+        }
+        
+        console.log('✅ Arquitectura JSON generada y validada correctamente');
+        console.log(`📂 Total de carpetas: ${architecture.folders.length}`);
+        console.log(`📄 Total de archivos: ${architecture.files.length}`);
+      } else {
+        console.log(`📂 Arquitectura recuperada: ${architecture.folders.length} carpetas, ${architecture.files.length} archivos`);
+      }
       
-      console.log('🧠 Consultando al modelo de IA para diseñar la arquitectura...');
-      console.log('   (Este proceso puede tardar hasta 30 segundos)');
-      let architecture = await this.agent.generateArchitecture(architecturePrompt);
-      
-      // Validar y optimizar la arquitectura
-      architecture = await this.agent.validateArchitecture(architecture, description);
-      
-      console.log('✅ Arquitectura JSON generada y validada correctamente');
-      console.log(`📂 Total de carpetas: ${architecture.folders.length}`);
-      console.log(`📄 Total de archivos: ${architecture.files.length}`);
-      console.log(`🔄 Archivos con plantilla: ${architecture.optimizationInfo?.templatedFiles || 0}`);
-      console.log(`🧩 Archivos personalizados: ${architecture.optimizationInfo?.customFiles || 0}`);
+      // Guardar estado para recuperación después de cada fase importante
+      await this._saveRecoveryState(recoveryPath, {
+        projectName: options.name || path.basename(outputPath),
+        description,
+        architecture,
+        fileCounter,
+        totalFiles: architecture.files.length,
+        options,
+        phase: 'architecture_ready',
+        generatedFiles
+      });
       
       // FASE 2: Crear estructura de carpetas
       console.log('\n📁 Fase 2: Creando estructura de carpetas...');
@@ -425,16 +477,32 @@ class ProjectGenerator {
       context.models = modelFiles;
       context.routes = routes;
       
+      // Guardar estado para recuperación
+      await this._saveRecoveryState(recoveryPath, {
+        projectName: options.name || path.basename(outputPath),
+        description,
+        architecture,
+        fileCounter,
+        totalFiles: architecture.files.length,
+        options,
+        context,
+        phase: 'models_analyzed',
+        generatedFiles
+      });
+      
       // FASE 4: Generar archivos basados en plantillas o IA según la configuración
       console.log('\n📝 Fase 4: Generando archivos del proyecto...');
       const useTemplates = options.useTemplates !== false; // Usar plantillas por defecto
       console.log(`   Usando plantillas CRUD: ${useTemplates ? 'Sí' : 'No'}`);
       
-      let fileCounter = 0;
       const totalFiles = architecture.files.length;
-      const generatedFiles = [];
       
-      // Primero crear archivos de configuración y estructura básica
+      // Si estamos recuperando la generación, mostramos el progreso actual
+      if (continueGeneration && fileCounter > 0) {
+        console.log(`   Continuando desde el archivo ${fileCounter+1}/${totalFiles}`);
+      }
+      
+      // Organizamos los archivos por categoría para una generación ordenada
       const configFiles = architecture.files.filter(file => {
         return file.path.includes('config/') || 
                file.path.includes('package.json') || 
@@ -443,50 +511,18 @@ class ProjectGenerator {
                file.path.includes('middleware/');
       });
       
-      console.log('\n🔧 Generando archivos de configuración...');
-      for (const file of configFiles) {
-        fileCounter++;
-        const filePath = await this._generateFile(file, outputPath, context, useTemplates && file.useTemplate, fileCounter, totalFiles);
-        if (filePath) generatedFiles.push(filePath);
-      }
-      
-      // Luego crear modelos
       const modelFilesToCreate = architecture.files.filter(file => 
         this._getFileTypeFromPath(file.path) === 'model'
       );
       
-      console.log('\n📦 Generando modelos...');
-      for (const file of modelFilesToCreate) {
-        fileCounter++;
-        const filePath = await this._generateFile(file, outputPath, context, useTemplates && file.useTemplate, fileCounter, totalFiles);
-        if (filePath) generatedFiles.push(filePath);
-      }
-      
-      // Luego crear controladores
       const controllerFiles = architecture.files.filter(file => 
         this._getFileTypeFromPath(file.path) === 'controller'
       );
       
-      console.log('\n🎮 Generando controladores...');
-      for (const file of controllerFiles) {
-        fileCounter++;
-        const filePath = await this._generateFile(file, outputPath, context, useTemplates && file.useTemplate, fileCounter, totalFiles);
-        if (filePath) generatedFiles.push(filePath);
-      }
-      
-      // Por último crear rutas
       const routeFiles = architecture.files.filter(file => 
         this._getFileTypeFromPath(file.path) === 'route'
       );
       
-      console.log('\n🛣️ Generando rutas...');
-      for (const file of routeFiles) {
-        fileCounter++;
-        const filePath = await this._generateFile(file, outputPath, context, useTemplates && file.useTemplate, fileCounter, totalFiles);
-        if (filePath) generatedFiles.push(filePath);
-      }
-      
-      // Finalmente, crear otros archivos que no entraron en las categorías anteriores
       const remainingFiles = architecture.files.filter(file => {
         return !configFiles.includes(file) && 
                !modelFilesToCreate.includes(file) && 
@@ -494,36 +530,139 @@ class ProjectGenerator {
                !routeFiles.includes(file);
       });
       
-      console.log('\n📄 Generando archivos adicionales...');
-      for (const file of remainingFiles) {
-        fileCounter++;
-        const filePath = await this._generateFile(file, outputPath, context, useTemplates && file.useTemplate, fileCounter, totalFiles);
-        if (filePath) generatedFiles.push(filePath);
+      // Función para generar archivos por categoría con manejo de errores
+      const generateFileCategory = async (files, categoryName, startIndex = 0) => {
+        console.log(`\n${categoryName}...`);
+        for (let i = startIndex; i < files.length; i++) {
+          const file = files[i];
+          fileCounter++;
+          
+          try {
+            const filePath = await this._generateFile(file, outputPath, context, useTemplates && file.useTemplate, fileCounter, totalFiles);
+            if (filePath) generatedFiles.push(filePath);
+            
+            // Guardar estado después de cada archivo para poder recuperar
+            await this._saveRecoveryState(recoveryPath, {
+              projectName: options.name || path.basename(outputPath),
+              description,
+              architecture,
+              fileCounter,
+              totalFiles,
+              options,
+              context,
+              phase: 'generating_files',
+              currentCategory: categoryName,
+              currentCategoryIndex: i,
+              generatedFiles
+            });
+          } catch (error) {
+            console.error(`\n❌ Error al generar archivo ${file.path}:`, error.message);
+            console.log('Guardando estado para recuperación posterior...');
+            
+            await this._saveRecoveryState(recoveryPath, {
+              projectName: options.name || path.basename(outputPath),
+              description,
+              architecture,
+              fileCounter,
+              totalFiles,
+              options,
+              context,
+              phase: 'generating_files',
+              currentCategory: categoryName,
+              currentCategoryIndex: i,
+              lastError: error.message,
+              generatedFiles
+            });
+            
+            if (options.continueOnError) {
+              console.log('Continuando con el siguiente archivo...');
+              continue;
+            } else {
+              console.log('\n⚠️ La generación se ha interrumpido.');
+              console.log('Para continuar más tarde, ejecute el mismo comando.');
+              return false;
+            }
+          }
+        }
+        return true;
+      };
+      
+      // Determinar desde dónde continuar si estamos recuperando
+      let startConfig = 0, startModels = 0, startControllers = 0, startRoutes = 0, startRemaining = 0;
+      
+      if (continueGeneration && recoveryState) {
+        const { currentCategory, currentCategoryIndex } = recoveryState;
+        if (currentCategory) {
+          if (currentCategory.includes('configuración')) startConfig = currentCategoryIndex + 1;
+          else if (currentCategory.includes('modelos')) startModels = currentCategoryIndex + 1;
+          else if (currentCategory.includes('controladores')) startControllers = currentCategoryIndex + 1;
+          else if (currentCategory.includes('rutas')) startRoutes = currentCategoryIndex + 1;
+          else if (currentCategory.includes('adicionales')) startRemaining = currentCategoryIndex + 1;
+        }
       }
       
+      // Generar archivos por orden de importancia
+      let success = true;
+      if (success && startConfig < configFiles.length) 
+        success = await generateFileCategory(configFiles, '🔧 Generando archivos de configuración', startConfig);
+      
+      if (success && startModels < modelFilesToCreate.length) 
+        success = await generateFileCategory(modelFilesToCreate, '📦 Generando modelos', startModels);
+      
+      if (success && startControllers < controllerFiles.length) 
+        success = await generateFileCategory(controllerFiles, '🎮 Generando controladores', startControllers);
+      
+      if (success && startRoutes < routeFiles.length) 
+        success = await generateFileCategory(routeFiles, '🛣️ Generando rutas', startRoutes);
+      
+      if (success && startRemaining < remainingFiles.length) 
+        success = await generateFileCategory(remainingFiles, '📄 Generando archivos adicionales', startRemaining);
+      
       // Añadir globalQuery si está habilitado y no existe
-      if (options.includeGlobalQuery) {
+      if (success && options.includeGlobalQuery) {
         let globalQueryExists = architecture.files.some(file => 
           file.path.includes('globalQuery.js') || file.path.includes('global-query.js')
         );
         
         if (!globalQueryExists) {
           console.log('\n🔄 Generando archivo de consulta global...');
-          const globalQueryPath = path.join(outputPath, 'routes/globalQuery.js');
-          const globalQueryCode = await this.templateProcessor.generateGlobalQuery();
-          
-          await fs.ensureDir(path.dirname(globalQueryPath));
-          await fs.writeFile(globalQueryPath, globalQueryCode);
-          console.log(`   ✅ Archivo creado: ${globalQueryPath}`);
-          
-          // Actualizar app.js para incluir la ruta global
-          await this._updateAppWithGlobalQuery(outputPath);
-          generatedFiles.push(globalQueryPath);
+          try {
+            const globalQueryPath = path.join(outputPath, 'routes/globalQuery.js');
+            const globalQueryCode = await this.templateProcessor.generateGlobalQuery();
+            
+            await fs.ensureDir(path.dirname(globalQueryPath));
+            await fs.writeFile(globalQueryPath, globalQueryCode);
+            console.log(`   ✅ Archivo creado: ${globalQueryPath}`);
+            
+            // Actualizar app.js para incluir la ruta global
+            await this._updateAppWithGlobalQuery(outputPath);
+            generatedFiles.push(globalQueryPath);
+          } catch (error) {
+            console.error('\n❌ Error al generar globalQuery:', error.message);
+            if (!options.continueOnError) {
+              success = false;
+            }
+          }
         }
       }
       
+      // Si hemos llegado hasta aquí con éxito, guardar estado como completado
+      if (success) {
+        await this._saveRecoveryState(recoveryPath, {
+          projectName: options.name || path.basename(outputPath),
+          description,
+          architecture,
+          fileCounter,
+          totalFiles,
+          options,
+          phase: 'files_generated',
+          generatedFiles,
+          completed: true
+        });
+      }
+      
       // FASE 5: Comprobar si se requieren modificaciones antes de finalizar
-      if (options.allowPreviewEdit === true) {
+      if (success && options.allowPreviewEdit === true) {
         console.log('\n✏️ Fase 5: Edición previa a la finalización');
         
         // Aquí se podría implementar una interfaz para editar archivos
@@ -534,29 +673,68 @@ class ProjectGenerator {
       }
       
       // FASE 6: Generar diagrama y guardar en MongoDB
+      let diagramId = null;
+      let diagram = null;
+      
       console.log('\n📊 Fase 6: Generando diagrama y guardando en MongoDB...');
       
-      // Generar diagrama visual
-      const diagram = await this.diagramService.generateDiagram(architecture);
-      
-      // Guardar en MongoDB
-      const projectName = options.name || path.basename(outputPath);
-      const savedDiagram = await this.diagramService.saveDiagram({
-        name: projectName,
-        description,
-        architecture,
-        diagram,
-        outputPath,
-        options
-      });
-      
-      console.log('🗄️ Diagrama guardado correctamente en MongoDB.');
+      try {
+        // Generar diagrama visual
+        diagram = await this.diagramService.generateDiagram(architecture);
+        
+        // Intentar guardar en MongoDB
+        try {
+          // Guardar en MongoDB
+          const projectName = options.name || path.basename(outputPath);
+          const savedDiagram = await this.diagramService.saveDiagram({
+            name: projectName,
+            description,
+            architecture,
+            diagram,
+            outputPath,
+            options
+          });
+          
+          diagramId = savedDiagram._id;
+          console.log('🗄️ Diagrama guardado correctamente en MongoDB.');
+        } catch (dbError) {
+          console.error('⚠️ No se pudo guardar el diagrama en MongoDB:', dbError.message);
+          console.log('   Continuando sin persistencia en base de datos...');
+          
+          // Guardar localmente como respaldo
+          const diagramPath = path.join(outputPath, 'diagram.json');
+          await fs.writeJson(diagramPath, { 
+            architecture, 
+            diagram,
+            createdAt: new Date().toISOString()
+          }, { spaces: 2 });
+          console.log(`   ✅ Diagrama guardado localmente en: ${diagramPath}`);
+        }
+      } catch (diagramError) {
+        console.error('⚠️ Error al generar diagrama:', diagramError.message);
+        console.log('   Continuando sin generación de diagrama...');
+      }
       
       // FASE 7: Generar archivo ZIP si se solicita
       let zipPath = null;
       if (options.generateZip) {
         console.log('\n📦 Fase 7: Generando archivo ZIP del proyecto...');
-        zipPath = await this.agent.generateProjectZip(outputPath, `${projectName}.zip`);
+        try {
+          zipPath = await this.agent.generateProjectZip(outputPath, `${options.name || path.basename(outputPath)}.zip`);
+        } catch (zipError) {
+          console.error('⚠️ Error al generar archivo ZIP:', zipError.message);
+          console.log('   Continuando sin generar ZIP...');
+        }
+      }
+      
+      // Eliminar archivo de recuperación si todo se completó correctamente
+      if (success) {
+        try {
+          await fs.remove(recoveryPath);
+          console.log('\n✅ Generación completada exitosamente.');
+        } catch (unlinkError) {
+          console.warn('No se pudo eliminar el archivo de recuperación:', unlinkError.message);
+        }
       }
       
       console.log('\n🎉 Proyecto generado con éxito!');
@@ -568,10 +746,11 @@ class ProjectGenerator {
       return {
         architecture,
         diagram,
-        diagramId: savedDiagram._id,
+        diagramId,
         outputPath,
         zipPath,
-        generatedFiles
+        generatedFiles,
+        success
       };
     } catch (error) {
       console.error('\n❌ Error al generar proyecto completo:', error);
@@ -580,91 +759,165 @@ class ProjectGenerator {
   }
   
   /**
-   * Genera un archivo del proyecto usando plantillas predefinidas cuando es posible
-   * @param {Object} file - Información del archivo a generar
-   * @param {string} outputPath - Ruta base de salida
-   * @param {Object} context - Contexto de la generación
-   * @param {boolean} useTemplate - Si se deben usar plantillas CRUD predefinidas
-   * @param {number} fileCounter - Contador actual de archivo
-   * @param {number} totalFiles - Total de archivos a generar
-   * @returns {Promise<string>} - Ruta del archivo generado o null si hubo error
+   * Guarda el estado actual de la generación para recuperación
+   * @param {string} recoveryPath - Ruta del archivo de recuperación
+   * @param {Object} state - Estado de la generación
+   * @returns {Promise<void>}
    * @private
    */
-  async _generateFile(file, outputPath, context, useTemplate, fileCounter, totalFiles) {
+  async _saveRecoveryState(recoveryPath, state) {
     try {
-      const filePath = path.join(outputPath, file.path);
-      const fileExtension = path.extname(file.path).toLowerCase();
-      const fileName = path.basename(file.path, fileExtension);
-      const fileType = this._getFileTypeFromPath(file.path);
-      
-      console.log(`\n[${fileCounter}/${totalFiles}] Generando: ${file.path}`);
-      console.log(`   Tipo: ${fileType || 'Archivo general'}${useTemplate ? ' (plantilla)' : ''}`);
-      
-      let code = null;
-      
-      // Determinar si usamos plantilla o IA basado en tipo de archivo y configuración
-      if (useTemplate) {
-        console.log(`   Usando plantilla para ${fileType || 'archivo'}...`);
-        
-        if (fileType === 'model' && (fileExtension === '.js' || fileExtension === '.ts')) {
-          const modelData = {
-            modelName: this._getModelNameFromPath(file.path),
-            fields: await this._generateModelFields(file.description, context),
-            methods: await this._generateModelMethods(file.description, context),
-            statics: []
-          };
-          
-          code = await this.templateProcessor.generateModel(modelData);
-        } 
-        else if (fileType === 'controller' && (fileExtension === '.js' || fileExtension === '.ts')) {
-          const controllerData = {
-            modelName: this._getModelNameFromPath(file.path),
-            modelFileName: this._getModelFileNameFromPath(file.path),
-          };
-          
-          code = await this.templateProcessor.generateController(controllerData);
-        } 
-        else if (fileType === 'route' && (fileExtension === '.js' || fileExtension === '.ts')) {
-          const routeData = {
-            modelName: this._getModelNameFromPath(file.path),
-            controllerFileName: this._getModelFileNameFromPath(file.path) + 'Controller',
-            authMiddleware: context.auth !== 'none'
-          };
-          
-          code = await this.templateProcessor.generateRoute(routeData);
-        } 
-        else if (fileName === 'app' && (fileExtension === '.js' || fileExtension === '.ts')) {
-          const appData = {
-            routes: context.routes || [],
-            database: context.database || 'MongoDB',
-          };
-          
-          code = await this.templateProcessor.generateApp(appData);
-        } 
-        else if (fileName === 'globalQuery' && (fileExtension === '.js' || fileExtension === '.ts')) {
-          code = await this.templateProcessor.generateGlobalQuery();
-        } else {
-          // Si no tenemos plantilla específica, usar IA de todos modos
-          useTemplate = false;
-        }
-      }
-      
-      // Si no tenemos código de plantilla, generar con IA
-      if (!code) {
-        console.log('   Generando código con IA...');
-        code = await this.agent.generateCode(file.path, file.description, context);
-      }
-      
-      // Asegurarse de que la carpeta exista y escribir el archivo
-      await fs.ensureDir(path.dirname(filePath));
-      await fs.writeFile(filePath, code);
-      console.log(`   ✅ Archivo creado: ${filePath}`);
-      
-      return filePath;
+      // Añadir timestamp
+      state.timestamp = new Date().toISOString();
+      await fs.writeJson(recoveryPath, state, { spaces: 2 });
     } catch (error) {
-      console.error(`   ❌ Error al generar archivo ${file.path}:`, error.message);
-      return null;
+      console.warn('No se pudo guardar el estado de recuperación:', error.message);
     }
+  }
+  
+  /**
+   * Obtiene una arquitectura predeterminada para casos de error
+   * @param {string} description - Descripción del proyecto
+   * @param {Object} options - Opciones de configuración
+   * @returns {Object} Arquitectura por defecto
+   * @private
+   */
+  _getDefaultArchitecture(description, options) {
+    const projectType = this._detectProjectType(description);
+    
+    // Arquitectura básica predeterminada
+    const architecture = {
+      folders: [
+        { path: 'src', description: 'Código fuente del proyecto' },
+        { path: 'src/models', description: 'Modelos de datos' },
+        { path: 'src/controllers', description: 'Controladores de la API' },
+        { path: 'src/routes', description: 'Rutas de la API' },
+        { path: 'src/middlewares', description: 'Middlewares' },
+        { path: 'src/config', description: 'Configuración de la aplicación' },
+        { path: 'src/utils', description: 'Utilidades y helpers' }
+      ],
+      files: [
+        { path: 'package.json', description: 'Configuración del proyecto', useTemplate: true, templateType: 'config' },
+        { path: '.env.example', description: 'Variables de entorno de ejemplo', useTemplate: true, templateType: 'config' },
+        { path: 'src/app.js', description: 'Aplicación principal', useTemplate: true, templateType: 'main' },
+        { path: 'src/server.js', description: 'Servidor de la aplicación', useTemplate: true, templateType: 'config' },
+        { path: 'src/config/database.js', description: 'Configuración de la base de datos', useTemplate: true, templateType: 'config' },
+        { path: 'src/middlewares/authMiddleware.js', description: 'Middleware de autenticación', useTemplate: true, templateType: 'middleware' },
+        { path: 'src/middlewares/errorMiddleware.js', description: 'Middleware de manejo de errores', useTemplate: true, templateType: 'middleware' },
+        { path: 'README.md', description: 'Documentación del proyecto', useTemplate: false }
+      ]
+    };
+    
+    // Añadir archivos según el tipo de proyecto detectado
+    if (projectType) {
+      projectType.entities.forEach(entity => {
+        // Modelo
+        architecture.files.push({
+          path: `src/models/${entity.toLowerCase()}.js`,
+          description: `Modelo para ${entity}`,
+          useTemplate: true,
+          templateType: 'model'
+        });
+        
+        // Controlador
+        architecture.files.push({
+          path: `src/controllers/${entity.toLowerCase()}Controller.js`,
+          description: `Controlador para ${entity}`,
+          useTemplate: true,
+          templateType: 'controller'
+        });
+        
+        // Ruta
+        architecture.files.push({
+          path: `src/routes/${entity.toLowerCase()}Routes.js`,
+          description: `Rutas para ${entity}`,
+          useTemplate: true,
+          templateType: 'route'
+        });
+      });
+    } else {
+      // Añadir un modelo, controlador y ruta genéricos si no se detectó ningún tipo
+      architecture.files.push({
+        path: 'src/models/item.js',
+        description: 'Modelo genérico',
+        useTemplate: true,
+        templateType: 'model'
+      });
+      
+      architecture.files.push({
+        path: 'src/controllers/itemController.js',
+        description: 'Controlador genérico',
+        useTemplate: true,
+        templateType: 'controller'
+      });
+      
+      architecture.files.push({
+        path: 'src/routes/itemRoutes.js',
+        description: 'Rutas genéricas',
+        useTemplate: true,
+        templateType: 'route'
+      });
+    }
+    
+    // Añadir globalQuery si está habilitado
+    if (options.includeGlobalQuery) {
+      architecture.files.push({
+        path: 'src/routes/globalQuery.js',
+        description: 'Consulta global para administradores',
+        useTemplate: true,
+        templateType: 'route'
+      });
+    }
+    
+    return architecture;
+  }
+  
+  /**
+   * Detecta el tipo de proyecto y entidades principales basado en la descripción
+   * @param {string} description - Descripción del proyecto
+   * @returns {Object|null} - Tipo de proyecto detectado o null
+   * @private
+   */
+  _detectProjectType(description) {
+    const desc = description.toLowerCase();
+    
+    // Tipos comunes de proyectos
+    const types = [
+      {
+        type: 'ecommerce',
+        keywords: ['ecommerce', 'tienda', 'venta', 'producto', 'carrito', 'compra'],
+        entities: ['Producto', 'Usuario', 'Pedido', 'Categoria']
+      },
+      {
+        type: 'blog',
+        keywords: ['blog', 'artículo', 'post', 'comentario', 'autor'],
+        entities: ['Articulo', 'Usuario', 'Comentario', 'Categoria']
+      },
+      {
+        type: 'cms',
+        keywords: ['cms', 'contenido', 'página', 'administración'],
+        entities: ['Pagina', 'Usuario', 'Media', 'Seccion']
+      },
+      {
+        type: 'booking',
+        keywords: ['reserva', 'hotel', 'viaje', 'habitación', 'reservación'],
+        entities: ['Reserva', 'Usuario', 'Habitacion', 'Hotel']
+      },
+      {
+        type: 'inventory',
+        keywords: ['inventario', 'stock', 'almacén', 'producto'],
+        entities: ['Producto', 'Categoria', 'Proveedor', 'Stock']
+      }
+    ];
+    
+    // Buscar coincidencias
+    for (const type of types) {
+      if (type.keywords.some(keyword => desc.includes(keyword))) {
+        return type;
+      }
+    }
+    
+    return null;
   }
 
   /**
