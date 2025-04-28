@@ -322,984 +322,825 @@ class ProjectGenerator {
       throw error;
     }
   }
-  
-  /**
-   * Genera un backend completo que incluye:
-   * - Estructura de carpetas y archivos
-   * - Código generado por IA
-   * - Diagrama guardado en MongoDB
-   * @param {string} description - Descripción del backend
-   * @param {string} outputPath - Ruta donde se generará el backend
-   * @param {Object} options - Opciones adicionales (nombre, base de datos, framework, etc.)
-   * @returns {Promise<Object>} - Resultado con la arquitectura y diagrama generados
-   */
-  async generateCompleteProject(description, outputPath, options = {}) {
-    try {
-      // Intentar cargar el estado de recuperación si existe
-      const recoveryPath = path.join(outputPath, '.recovery.json');
-      let recoveryState = null;
-      let architecture = null;
-      let fileCounter = 0;
-      let continueGeneration = false;
-      let generatedFiles = [];
-      
-      if (await fs.pathExists(recoveryPath)) {
-        try {
-          recoveryState = JSON.parse(await fs.readFile(recoveryPath, 'utf8'));
-          console.log('\n🔄 Detectado estado de recuperación. ¿Desea continuar la generación interrumpida?');
-          console.log(`   Proyecto: ${recoveryState.projectName}`);
-          console.log(`   Progreso: ${recoveryState.fileCounter}/${recoveryState.totalFiles} archivos generados`);
-          
-          // En una implementación real, aquí preguntaríamos al usuario
-          // Por ahora, asumiremos que sí quiere continuar
-          continueGeneration = true;
-          
-          if (continueGeneration) {
-            console.log('\n✅ Continuando la generación desde el punto de interrupción...');
-            architecture = recoveryState.architecture;
-            fileCounter = recoveryState.fileCounter;
-            generatedFiles = recoveryState.generatedFiles || [];
-          } else {
-            console.log('\n🔄 Comenzando nueva generación. Se ignorará el estado anterior...');
-            await fs.remove(recoveryPath);
-          }
-        } catch (error) {
-          console.warn('Error al leer el archivo de recuperación:', error.message);
-          console.log('Comenzando nueva generación...');
-        }
-      }
-      
-      console.log('\n🚀 Iniciando generación de proyecto completo...');
-      console.log(`📝 Nombre: "${options.name || path.basename(outputPath)}"`);
-      console.log(`📋 Descripción: "${description}"`);
-      
-      // FASE 1: Generar y validar la arquitectura JSON antes de crear archivos (si no estamos recuperando)
-      if (!architecture) {
-        console.log('\n📊 Fase 1: Analizando requisitos y generando estructura JSON...');
-        
-        const architecturePrompt = `
-          Genera una arquitectura de backend para una API con las siguientes características:
-          - Base de datos: ${options.database || 'MongoDB'}
-          - Framework: ${options.framework || 'Express'}
-          - Autenticación: ${options.auth || 'JWT'}
-          - Descripción: ${description}
-          
-          Debe incluir modelos, controladores, rutas, middleware, y configuración de base de datos.
-          El proyecto debe estar listo para uso y despliegue inmediato.
-          Incluye instrucciones de instalación y configuración en un README.md.
-          Incluye un archivo package.json con todas las dependencias necesarias.
-          Proporciona un archivo .env.example con las variables de entorno necesarias.
-          ${options.includeGlobalQuery ? 'Incluye un archivo de consulta global (globalQuery.js) en la carpeta de rutas.' : ''}
 
-          Responde ÚNICAMENTE con un objeto JSON.
-        `;
-        
-        console.log('🧠 Consultando al modelo de IA para diseñar la arquitectura...');
-        console.log('   (Este proceso puede tardar hasta 30 segundos)');
-        
-        try {
-          architecture = await this.agent.generateArchitecture(architecturePrompt);
-          architecture = await this.agent.validateArchitecture(architecture, description);
-        } catch (error) {
-          console.error('\n❌ Error al generar arquitectura:', error.message);
-          console.log('Intentando cargar arquitectura predeterminada...');
-          architecture = this._getDefaultArchitecture(description, options);
-        }
-        
-        console.log('✅ Arquitectura JSON generada y validada correctamente');
-        console.log(`📂 Total de carpetas: ${architecture.folders.length}`);
-        console.log(`📄 Total de archivos: ${architecture.files.length}`);
-      } else {
-        console.log(`📂 Arquitectura recuperada: ${architecture.folders.length} carpetas, ${architecture.files.length} archivos`);
-      }
-      
-      // Guardar estado para recuperación después de cada fase importante
-      await this._saveRecoveryState(recoveryPath, {
-        projectName: options.name || path.basename(outputPath),
-        description,
-        architecture,
-        fileCounter,
-        totalFiles: architecture.files.length,
-        options,
-        phase: 'architecture_ready',
-        generatedFiles
-      });
-      
-      // FASE 2: Crear estructura de carpetas
-      console.log('\n📁 Fase 2: Creando estructura de carpetas...');
-      for (const folder of architecture.folders) {
-        const folderPath = path.join(outputPath, folder.path);
-        await fs.ensureDir(folderPath);
-        console.log(`   ✓ ${folderPath}`);
-      }
-      
-      // Contexto enriquecido para la generación del código
-      const context = {
-        ...options,
-        description,
-        projectName: options.name || path.basename(outputPath),
-        language: options.language || 'JavaScript',
-        database: options.database || 'MongoDB',
-        framework: options.framework || 'Express',
-        auth: options.auth || 'JWT',
-        folders: architecture.folders,
-        files: architecture.files
-      };
-      
-      // FASE 3: Analizar modelos y rutas
-      console.log('\n🔍 Fase 3: Analizando modelos y rutas del proyecto...');
-      const modelFiles = [];
-      const routes = [];
-      
-      // Identificar modelos
-      for (const file of architecture.files) {
-        if (this._getFileTypeFromPath(file.path) === 'model') {
-          const modelName = this._getModelNameFromPath(file.path);
-          modelFiles.push({
-            name: modelName,
-            path: file.path,
-            description: file.description,
-            useTemplate: file.useTemplate || false
-          });
-          console.log(`   ✓ Modelo identificado: ${modelName}${file.useTemplate ? ' (plantilla)' : ''}`);
-        } else if (this._getFileTypeFromPath(file.path) === 'route') {
-          const routeName = path.basename(file.path, '.js');
-          routes.push({
-            path: routeName,
-            file: routeName,
-            useTemplate: file.useTemplate || false
-          });
-          console.log(`   ✓ Ruta identificada: ${routeName}${file.useTemplate ? ' (plantilla)' : ''}`);
-        }
-      }
-      
-      // Agregar información de modelos al contexto
-      context.models = modelFiles;
-      context.routes = routes;
-      
-      // Guardar estado para recuperación
-      await this._saveRecoveryState(recoveryPath, {
-        projectName: options.name || path.basename(outputPath),
-        description,
-        architecture,
-        fileCounter,
-        totalFiles: architecture.files.length,
-        options,
-        context,
-        phase: 'models_analyzed',
-        generatedFiles
-      });
-      
-      // FASE 4: Generar archivos basados en plantillas o IA según la configuración
-      console.log('\n📝 Fase 4: Generando archivos del proyecto...');
-      const useTemplates = options.useTemplates !== false; // Usar plantillas por defecto
-      console.log(`   Usando plantillas CRUD: ${useTemplates ? 'Sí' : 'No'}`);
-      
-      const totalFiles = architecture.files.length;
-      
-      // Si estamos recuperando la generación, mostramos el progreso actual
-      if (continueGeneration && fileCounter > 0) {
-        console.log(`   Continuando desde el archivo ${fileCounter+1}/${totalFiles}`);
-      }
-      
-      // Organizamos los archivos por categoría para una generación ordenada
-      const configFiles = architecture.files.filter(file => {
-        return file.path.includes('config/') || 
-               file.path.includes('package.json') || 
-               file.path.includes('.env') ||
-               file.path.includes('app.js') ||
-               file.path.includes('middleware/');
-      });
-      
-      const modelFilesToCreate = architecture.files.filter(file => 
-        this._getFileTypeFromPath(file.path) === 'model'
-      );
-      
-      const controllerFiles = architecture.files.filter(file => 
-        this._getFileTypeFromPath(file.path) === 'controller'
-      );
-      
-      const routeFiles = architecture.files.filter(file => 
-        this._getFileTypeFromPath(file.path) === 'route'
-      );
-      
-      const remainingFiles = architecture.files.filter(file => {
-        return !configFiles.includes(file) && 
-               !modelFilesToCreate.includes(file) && 
-               !controllerFiles.includes(file) && 
-               !routeFiles.includes(file);
-      });
-      
-      // Función para generar archivos por categoría con manejo de errores
-      const generateFileCategory = async (files, categoryName, startIndex = 0) => {
-        console.log(`\n${categoryName}...`);
-        for (let i = startIndex; i < files.length; i++) {
-          const file = files[i];
-          fileCounter++;
-          
-          try {
-            const filePath = await this._generateFile(file, outputPath, context, useTemplates && file.useTemplate, fileCounter, totalFiles);
-            if (filePath) generatedFiles.push(filePath);
-            
-            // Guardar estado después de cada archivo para poder recuperar
-            await this._saveRecoveryState(recoveryPath, {
-              projectName: options.name || path.basename(outputPath),
-              description,
-              architecture,
-              fileCounter,
-              totalFiles,
-              options,
-              context,
-              phase: 'generating_files',
-              currentCategory: categoryName,
-              currentCategoryIndex: i,
-              generatedFiles
-            });
-          } catch (error) {
-            console.error(`\n❌ Error al generar archivo ${file.path}:`, error.message);
-            console.log('Guardando estado para recuperación posterior...');
-            
-            await this._saveRecoveryState(recoveryPath, {
-              projectName: options.name || path.basename(outputPath),
-              description,
-              architecture,
-              fileCounter,
-              totalFiles,
-              options,
-              context,
-              phase: 'generating_files',
-              currentCategory: categoryName,
-              currentCategoryIndex: i,
-              lastError: error.message,
-              generatedFiles
-            });
-            
-            if (options.continueOnError) {
-              console.log('Continuando con el siguiente archivo...');
-              continue;
-            } else {
-              console.log('\n⚠️ La generación se ha interrumpido.');
-              console.log('Para continuar más tarde, ejecute el mismo comando.');
-              return false;
-            }
-          }
-        }
-        return true;
-      };
-      
-      // Determinar desde dónde continuar si estamos recuperando
-      let startConfig = 0, startModels = 0, startControllers = 0, startRoutes = 0, startRemaining = 0;
-      
-      if (continueGeneration && recoveryState) {
-        const { currentCategory, currentCategoryIndex } = recoveryState;
-        if (currentCategory) {
-          if (currentCategory.includes('configuración')) startConfig = currentCategoryIndex + 1;
-          else if (currentCategory.includes('modelos')) startModels = currentCategoryIndex + 1;
-          else if (currentCategory.includes('controladores')) startControllers = currentCategoryIndex + 1;
-          else if (currentCategory.includes('rutas')) startRoutes = currentCategoryIndex + 1;
-          else if (currentCategory.includes('adicionales')) startRemaining = currentCategoryIndex + 1;
-        }
-      }
-      
-      // Generar archivos por orden de importancia
-      let success = true;
-      if (success && startConfig < configFiles.length) 
-        success = await generateFileCategory(configFiles, '🔧 Generando archivos de configuración', startConfig);
-      
-      if (success && startModels < modelFilesToCreate.length) 
-        success = await generateFileCategory(modelFilesToCreate, '📦 Generando modelos', startModels);
-      
-      if (success && startControllers < controllerFiles.length) 
-        success = await generateFileCategory(controllerFiles, '🎮 Generando controladores', startControllers);
-      
-      if (success && startRoutes < routeFiles.length) 
-        success = await generateFileCategory(routeFiles, '🛣️ Generando rutas', startRoutes);
-      
-      if (success && startRemaining < remainingFiles.length) 
-        success = await generateFileCategory(remainingFiles, '📄 Generando archivos adicionales', startRemaining);
-      
-      // Añadir globalQuery si está habilitado y no existe
-      if (success && options.includeGlobalQuery) {
-        let globalQueryExists = architecture.files.some(file => 
-          file.path.includes('globalQuery.js') || file.path.includes('global-query.js')
-        );
-        
-        if (!globalQueryExists) {
-          console.log('\n🔄 Generando archivo de consulta global...');
-          try {
-            const globalQueryPath = path.join(outputPath, 'routes/globalQuery.js');
-            const globalQueryCode = await this.templateProcessor.generateGlobalQuery();
-            
-            await fs.ensureDir(path.dirname(globalQueryPath));
-            await fs.writeFile(globalQueryPath, globalQueryCode);
-            console.log(`   ✅ Archivo creado: ${globalQueryPath}`);
-            
-            // Actualizar app.js para incluir la ruta global
-            await this._updateAppWithGlobalQuery(outputPath);
-            generatedFiles.push(globalQueryPath);
-          } catch (error) {
-            console.error('\n❌ Error al generar globalQuery:', error.message);
-            if (!options.continueOnError) {
-              success = false;
-            }
-          }
-        }
-      }
-      
-      // Si hemos llegado hasta aquí con éxito, guardar estado como completado
-      if (success) {
-        await this._saveRecoveryState(recoveryPath, {
-          projectName: options.name || path.basename(outputPath),
-          description,
-          architecture,
-          fileCounter,
-          totalFiles,
-          options,
-          phase: 'files_generated',
-          generatedFiles,
-          completed: true
-        });
-      }
-      
-      // FASE 5: Comprobar si se requieren modificaciones antes de finalizar
-      if (success && options.allowPreviewEdit === true) {
-        console.log('\n✏️ Fase 5: Edición previa a la finalización');
-        
-        // Aquí se podría implementar una interfaz para editar archivos
-        console.log('   Edición manual habilitada. Puede editar los archivos generados antes de continuar.');
-        console.log('   Archivos generados disponibles en:', outputPath);
-        
-        // En una implementación real, aquí habría una pausa para permitir ediciones
-      }
-      
-      // FASE 6: Generar diagrama y guardar en MongoDB
-      let diagramId = null;
-      let diagram = null;
-      
-      console.log('\n📊 Fase 6: Generando diagrama y guardando en MongoDB...');
-      
-      try {
-        // Generar diagrama visual
-        diagram = await this.diagramService.generateDiagram(architecture);
-        
-        // Intentar guardar en MongoDB
-        try {
-          // Guardar en MongoDB
-          const projectName = options.name || path.basename(outputPath);
-          const savedDiagram = await this.diagramService.saveDiagram({
-            name: projectName,
-            description,
-            architecture,
-            diagram,
-            outputPath,
-            options
-          });
-          
-          diagramId = savedDiagram._id;
-          console.log('🗄️ Diagrama guardado correctamente en MongoDB.');
-        } catch (dbError) {
-          console.error('⚠️ No se pudo guardar el diagrama en MongoDB:', dbError.message);
-          console.log('   Continuando sin persistencia en base de datos...');
-          
-          // Guardar localmente como respaldo
-          const diagramPath = path.join(outputPath, 'diagram.json');
-          await fs.writeJson(diagramPath, { 
-            architecture, 
-            diagram,
-            createdAt: new Date().toISOString()
-          }, { spaces: 2 });
-          console.log(`   ✅ Diagrama guardado localmente en: ${diagramPath}`);
-        }
-      } catch (diagramError) {
-        console.error('⚠️ Error al generar diagrama:', diagramError.message);
-        console.log('   Continuando sin generación de diagrama...');
-      }
-      
-      // FASE 7: Generar archivo ZIP si se solicita
-      let zipPath = null;
-      if (options.generateZip) {
-        console.log('\n📦 Fase 7: Generando archivo ZIP del proyecto...');
-        try {
-          zipPath = await this.agent.generateProjectZip(outputPath, `${options.name || path.basename(outputPath)}.zip`);
-        } catch (zipError) {
-          console.error('⚠️ Error al generar archivo ZIP:', zipError.message);
-          console.log('   Continuando sin generar ZIP...');
-        }
-      }
-      
-      // Eliminar archivo de recuperación si todo se completó correctamente
-      if (success) {
-        try {
-          await fs.remove(recoveryPath);
-          console.log('\n✅ Generación completada exitosamente.');
-        } catch (unlinkError) {
-          console.warn('No se pudo eliminar el archivo de recuperación:', unlinkError.message);
-        }
-      }
-      
-      console.log('\n🎉 Proyecto generado con éxito!');
-      console.log(`📁 Ubicación: ${outputPath}`);
-      if (zipPath) {
-        console.log(`🗜️ Archivo ZIP: ${zipPath}`);
-      }
-      
-      return {
-        architecture,
-        diagram,
-        diagramId,
-        outputPath,
-        zipPath,
-        generatedFiles,
-        success
-      };
-    } catch (error) {
-      console.error('\n❌ Error al generar proyecto completo:', error);
-      throw error;
-    }
-  }
-  
   /**
-   * Guarda el estado actual de la generación para recuperación
-   * @param {string} recoveryPath - Ruta del archivo de recuperación
-   * @param {Object} state - Estado de la generación
-   * @returns {Promise<void>}
-   * @private
-   */
-  async _saveRecoveryState(recoveryPath, state) {
-    try {
-      // Añadir timestamp
-      state.timestamp = new Date().toISOString();
-      await fs.writeJson(recoveryPath, state, { spaces: 2 });
-    } catch (error) {
-      console.warn('No se pudo guardar el estado de recuperación:', error.message);
-    }
-  }
-  
-  /**
-   * Obtiene una arquitectura predeterminada para casos de error
+   * Guarda la configuración y vista previa de un proyecto para uso futuro
+   * @param {string} projectName - Nombre del proyecto
    * @param {string} description - Descripción del proyecto
    * @param {Object} options - Opciones de configuración
-   * @returns {Object} Arquitectura por defecto
-   * @private
+   * @param {Object} architecture - Arquitectura generada
+   * @returns {Promise<Object>} - Resultado de la operación
    */
-  _getDefaultArchitecture(description, options) {
-    const projectType = this._detectProjectType(description);
-    
-    // Arquitectura básica predeterminada
-    const architecture = {
-      folders: [
-        { path: 'src', description: 'Código fuente del proyecto' },
-        { path: 'src/models', description: 'Modelos de datos' },
-        { path: 'src/controllers', description: 'Controladores de la API' },
-        { path: 'src/routes', description: 'Rutas de la API' },
-        { path: 'src/middlewares', description: 'Middlewares' },
-        { path: 'src/config', description: 'Configuración de la aplicación' },
-        { path: 'src/utils', description: 'Utilidades y helpers' }
-      ],
-      files: [
-        { path: 'package.json', description: 'Configuración del proyecto', useTemplate: true, templateType: 'config' },
-        { path: '.env.example', description: 'Variables de entorno de ejemplo', useTemplate: true, templateType: 'config' },
-        { path: 'src/app.js', description: 'Aplicación principal', useTemplate: true, templateType: 'main' },
-        { path: 'src/server.js', description: 'Servidor de la aplicación', useTemplate: true, templateType: 'config' },
-        { path: 'src/config/database.js', description: 'Configuración de la base de datos', useTemplate: true, templateType: 'config' },
-        { path: 'src/middlewares/authMiddleware.js', description: 'Middleware de autenticación', useTemplate: true, templateType: 'middleware' },
-        { path: 'src/middlewares/errorMiddleware.js', description: 'Middleware de manejo de errores', useTemplate: true, templateType: 'middleware' },
-        { path: 'README.md', description: 'Documentación del proyecto', useTemplate: false }
-      ]
-    };
-    
-    // Añadir archivos según el tipo de proyecto detectado
-    if (projectType) {
-      projectType.entities.forEach(entity => {
-        // Modelo
-        architecture.files.push({
-          path: `src/models/${entity.toLowerCase()}.js`,
-          description: `Modelo para ${entity}`,
-          useTemplate: true,
-          templateType: 'model'
-        });
-        
-        // Controlador
-        architecture.files.push({
-          path: `src/controllers/${entity.toLowerCase()}Controller.js`,
-          description: `Controlador para ${entity}`,
-          useTemplate: true,
-          templateType: 'controller'
-        });
-        
-        // Ruta
-        architecture.files.push({
-          path: `src/routes/${entity.toLowerCase()}Routes.js`,
-          description: `Rutas para ${entity}`,
-          useTemplate: true,
-          templateType: 'route'
-        });
-      });
-    } else {
-      // Añadir un modelo, controlador y ruta genéricos si no se detectó ningún tipo
-      architecture.files.push({
-        path: 'src/models/item.js',
-        description: 'Modelo genérico',
-        useTemplate: true,
-        templateType: 'model'
-      });
+  async saveProjectConfiguration(projectName, description, options, architecture) {
+    try {
+      console.log(`\n💾 Guardando configuración del proyecto "${projectName}"...`);
       
-      architecture.files.push({
-        path: 'src/controllers/itemController.js',
-        description: 'Controlador genérico',
-        useTemplate: true,
-        templateType: 'controller'
-      });
+      // Crear objeto de configuración
+      const projectConfig = {
+        name: projectName,
+        description,
+        options,
+        architecture,
+        createdAt: new Date().toISOString()
+      };
       
-      architecture.files.push({
-        path: 'src/routes/itemRoutes.js',
-        description: 'Rutas genéricas',
-        useTemplate: true,
-        templateType: 'route'
-      });
-    }
-    
-    // Añadir globalQuery si está habilitado
-    if (options.includeGlobalQuery) {
-      architecture.files.push({
-        path: 'src/routes/globalQuery.js',
-        description: 'Consulta global para administradores',
-        useTemplate: true,
-        templateType: 'route'
-      });
-    }
-    
-    return architecture;
-  }
-  
-  /**
-   * Detecta el tipo de proyecto y entidades principales basado en la descripción
-   * @param {string} description - Descripción del proyecto
-   * @returns {Object|null} - Tipo de proyecto detectado o null
-   * @private
-   */
-  _detectProjectType(description) {
-    const desc = description.toLowerCase();
-    
-    // Tipos comunes de proyectos
-    const types = [
-      {
-        type: 'ecommerce',
-        keywords: ['ecommerce', 'tienda', 'venta', 'producto', 'carrito', 'compra'],
-        entities: ['Producto', 'Usuario', 'Pedido', 'Categoria']
-      },
-      {
-        type: 'blog',
-        keywords: ['blog', 'artículo', 'post', 'comentario', 'autor'],
-        entities: ['Articulo', 'Usuario', 'Comentario', 'Categoria']
-      },
-      {
-        type: 'cms',
-        keywords: ['cms', 'contenido', 'página', 'administración'],
-        entities: ['Pagina', 'Usuario', 'Media', 'Seccion']
-      },
-      {
-        type: 'booking',
-        keywords: ['reserva', 'hotel', 'viaje', 'habitación', 'reservación'],
-        entities: ['Reserva', 'Usuario', 'Habitacion', 'Hotel']
-      },
-      {
-        type: 'inventory',
-        keywords: ['inventario', 'stock', 'almacén', 'producto'],
-        entities: ['Producto', 'Categoria', 'Proveedor', 'Stock']
+      // Ruta para guardar las configuraciones
+      const configDir = path.join(process.cwd(), 'saved-projects');
+      await fs.ensureDir(configDir);
+      
+      const configPath = path.join(configDir, `${projectName}.json`);
+      
+      // Verificar si ya existe un proyecto con ese nombre
+      if (await fs.pathExists(configPath)) {
+        console.log(`\n⚠️ Ya existe un proyecto con el nombre "${projectName}".`);
+        return { success: false, message: 'El proyecto ya existe' };
       }
-    ];
-    
-    // Buscar coincidencias
-    for (const type of types) {
-      if (type.keywords.some(keyword => desc.includes(keyword))) {
-        return type;
-      }
+      
+      // Guardar configuración
+      await fs.writeJson(configPath, projectConfig, { spaces: 2 });
+      
+      console.log(`✅ Configuración guardada en: ${configPath}`);
+      return { 
+        success: true, 
+        configPath,
+        project: projectConfig
+      };
+    } catch (error) {
+      console.error('Error al guardar la configuración del proyecto:', error);
+      return { success: false, message: error.message };
     }
-    
-    return null;
   }
 
   /**
-   * Carga un proyecto desde MongoDB por nombre y lo regenera
-   * @param {string} projectName - Nombre del proyecto
-   * @param {string} outputPath - Ruta donde regenerar el proyecto (opcional)
-   * @returns {Promise<Object>} - Resultado de la regeneración
+   * Lista todos los proyectos guardados localmente
+   * @returns {Promise<Array>} - Lista de proyectos guardados
    */
-  async regenerateProjectFromDiagram(projectName, outputPath = null) {
+  async listSavedProjects() {
     try {
-      console.log(`Buscando proyecto "${projectName}" en MongoDB...`);
+      const configDir = path.join(process.cwd(), 'saved-projects');
       
-      // Buscar diagrama en MongoDB
-      const savedProject = await this.diagramService.findDiagramByName(projectName);
+      // Verificar si existe el directorio
+      if (!await fs.pathExists(configDir)) {
+        return [];
+      }
       
-      if (!savedProject) {
-        throw new Error(`No se encontró un proyecto con el nombre "${projectName}"`);
+      // Listar archivos JSON
+      const files = await fs.readdir(configDir);
+      const jsonFiles = files.filter(file => file.endsWith('.json'));
+      
+      // Cargar información básica de cada proyecto
+      const projects = [];
+      
+      for (const file of jsonFiles) {
+        try {
+          const configPath = path.join(configDir, file);
+          const projectConfig = await fs.readJson(configPath);
+          
+          projects.push({
+            name: projectConfig.name,
+            description: projectConfig.description,
+            createdAt: projectConfig.createdAt,
+            path: configPath,
+            database: projectConfig.options.database,
+            framework: projectConfig.options.framework
+          });
+        } catch (error) {
+          console.warn(`Error al leer el archivo ${file}:`, error.message);
+        }
+      }
+      
+      return projects;
+    } catch (error) {
+      console.error('Error al listar proyectos guardados:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Carga la configuración de un proyecto guardado
+   * @param {string} projectName - Nombre del proyecto
+   * @returns {Promise<Object|null>} - Configuración del proyecto o null si no existe
+   */
+  async loadProjectConfiguration(projectName) {
+    try {
+      const configDir = path.join(process.cwd(), 'saved-projects');
+      const configPath = path.join(configDir, `${projectName}.json`);
+      
+      // Verificar si existe el archivo
+      if (!await fs.pathExists(configPath)) {
+        return null;
+      }
+      
+      // Cargar configuración
+      const projectConfig = await fs.readJson(configPath);
+      return projectConfig;
+    } catch (error) {
+      console.error(`Error al cargar la configuración del proyecto ${projectName}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Genera un proyecto a partir de una configuración guardada
+   * @param {string} projectName - Nombre del proyecto guardado
+   * @param {string} outputPath - Ruta de salida (opcional)
+   * @returns {Promise<Object>} - Resultado de la generación
+   */
+  async generateFromSaved(projectName, outputPath = null) {
+    try {
+      console.log(`\n🔄 Generando proyecto a partir de la configuración guardada: "${projectName}"`);
+      
+      // Cargar configuración
+      const projectConfig = await this.loadProjectConfiguration(projectName);
+      
+      if (!projectConfig) {
+        throw new Error(`No se encontró un proyecto guardado con el nombre "${projectName}"`);
       }
       
       // Determinar ruta de salida
-      const targetPath = outputPath || savedProject.outputPath || path.join(process.cwd(), projectName);
+      const targetPath = outputPath || path.join(process.cwd(), 'output', projectName);
       
-      console.log(`Regenerando proyecto en: ${targetPath}`);
+      console.log(`📝 Descripción: ${projectConfig.description}`);
+      console.log(`📁 Ruta de salida: ${targetPath}`);
+      console.log(`💾 Base de datos: ${projectConfig.options.database}`);
+      console.log(`🚀 Framework: ${projectConfig.options.framework}`);
       
-      // Generar estructura y archivos
+      // Generar el proyecto usando las opciones guardadas
       const result = await this.generateBackend(
-        savedProject.description,
+        projectConfig.description,
         targetPath,
-        savedProject.options
+        projectConfig.options
       );
       
       return {
-        architecture: result.architecture,
-        outputPath: targetPath,
-        diagram: savedProject.diagram,
-        diagramId: savedProject._id
+        ...result,
+        projectName,
+        outputPath: targetPath
       };
     } catch (error) {
-      console.error('Error al regenerar proyecto desde diagrama:', error);
+      console.error('Error al generar proyecto desde configuración guardada:', error);
       throw error;
     }
   }
 
   /**
-   * Obtiene una lista de proyectos recientes
-   * @param {number} limit - Número máximo de proyectos a obtener
-   * @returns {Promise<Array>} - Lista de proyectos
+   * Interactúa con el agente de IA para obtener recomendaciones de configuración
+   * @param {string} description - Descripción del proyecto
+   * @param {Object} options - Opciones iniciales proporcionadas por el usuario
+   * @returns {Promise<Object>} Opciones enriquecidas con recomendaciones de IA
    */
-  async getRecentProjects(limit = 10) {
+  async interactWithAgent(description, options = {}) {
     try {
-      return await this.diagramService.getRecentDiagrams(limit);
-    } catch (error) {
-      console.error('Error al obtener proyectos recientes:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Genera un webhook para un servicio específico
-   * @param {string} serviceName - Nombre del servicio (WhatsApp, Twitch, etc.)
-   * @param {string} outputPath - Ruta donde se generará el webhook
-   * @param {Object} options - Opciones adicionales
-   * @returns {Promise<Object>} - Información del webhook generado
-   */
-  async generateWebhook(serviceName, outputPath, options = {}) {
-    try {
-      console.log(`Generando webhook para ${serviceName}...`);
+      console.log('\n🤖 Consultando al agente de IA para recomendaciones...');
       
-      // Obtener configuración del webhook basada en el servicio
-      const webhookConfig = await this.templateProcessor.generateWebhookConfig(serviceName);
-      
-      // Preparar rutas de archivos
-      const webhooksDir = path.join(outputPath, 'routes', 'webhooks');
-      const webhookFileName = `${webhookConfig.serviceName.toLowerCase()}Webhook.js`;
-      const webhookFilePath = path.join(webhooksDir, webhookFileName);
-      
-      // Crear directorio para webhooks si no existe
-      await fs.ensureDir(webhooksDir);
-      
-      // Generar el código del webhook
-      const webhookCode = await this.templateProcessor.generateWebhook(webhookConfig);
-      
-      // Escribir el archivo
-      await fs.writeFile(webhookFilePath, webhookCode);
-      console.log(`Webhook creado: ${webhookFilePath}`);
-      
-      // Actualizar app.js para incluir el webhook
-      await this._updateAppWithWebhook(outputPath, webhookConfig);
-      
-      // Actualizar .env.example con variables necesarias para el webhook
-      await this._updateEnvWithWebhook(outputPath, webhookConfig);
-      
-      console.log(`Webhook para ${serviceName} generado con éxito.`);
-      return { webhookPath: webhookFilePath, serviceName: webhookConfig.serviceName };
-    } catch (error) {
-      console.error(`Error al generar webhook para ${serviceName}:`, error);
-      throw error;
-    }
-  }
-  
-  /**
-   * Actualiza app.js para incluir la ruta del webhook
-   * @param {string} outputPath - Ruta del proyecto
-   * @param {Object} webhookConfig - Configuración del webhook
-   * @returns {Promise<void>}
-   * @private
-   */
-  async _updateAppWithWebhook(outputPath, webhookConfig) {
-    const appPath = path.join(outputPath, 'app.js');
-    if (await fs.exists(appPath)) {
-      // Leer contenido actual
-      let appContent = await fs.readFile(appPath, 'utf8');
-      
-      // Verificar si ya incluye la importación para webhooks
-      if (!appContent.includes('webhooks')) {
-        // Añadir la ruta para webhooks
-        const routePath = `/api/webhooks/${webhookConfig.serviceName.toLowerCase()}`;
-        const requirePath = `./routes/webhooks/${webhookConfig.serviceName.toLowerCase()}Webhook`;
+      // Construir el prompt para el agente
+      const prompt = `
+        Analiza esta descripción de proyecto y proporciona recomendaciones de configuración:
+        "${description}"
         
-        // Buscar dónde insertar la nueva ruta
-        const routesSection = appContent.match(/\/\/ Rutas[\s\S]*?(app\.use|module\.exports)/);
+        Responde con un objeto JSON con las siguientes propiedades:
+        1. database: Base de datos recomendada (MongoDB, PostgreSQL, MySQL, etc.)
+        2. framework: Framework recomendado (Express, Koa, Fastify, etc.)
+        3. auth: Método de autenticación recomendado (JWT, OAuth2, API Key, etc.)
+        4. includeGraphQL: Si recomiendas incluir GraphQL (true/false)
+        5. includeWebsockets: Si recomiendas incluir WebSockets (true/false)
+        6. includeGlobalQuery: Si recomiendas incluir una consulta global (true/false)
+        7. recommendations: Arreglo de recomendaciones específicas para este proyecto
+        8. suggestions: Arreglo de sugerencias de paquetes npm útiles para este proyecto
         
-        if (routesSection) {
-          const updatedContent = appContent.replace(
-            routesSection[0],
-            `${routesSection[0].replace(routesSection[1], '')}\napp.use('${routePath}', require('${requirePath}'));\n\n${routesSection[1]}`
-          );
-          
-          await fs.writeFile(appPath, updatedContent);
-          console.log(`App.js actualizado con la ruta del webhook: ${routePath}`);
-        } else {
-          console.log('No se pudo encontrar la sección de rutas en app.js para actualizar');
-        }
-      } else {
-        console.log('App.js ya incluye rutas para webhooks');
-      }
-    } else {
-      console.log('No se encontró app.js para actualizar');
-    }
-  }
-  
-  /**
-   * Actualiza .env.example con variables necesarias para el webhook
-   * @param {string} outputPath - Ruta del proyecto
-   * @param {Object} webhookConfig - Configuración del webhook
-   * @returns {Promise<void>}
-   * @private
-   */
-  async _updateEnvWithWebhook(outputPath, webhookConfig) {
-    const envPath = path.join(outputPath, '.env.example');
-    
-    // Variables a añadir
-    const envVars = [];
-    
-    // Si requiere token de verificación, añadir variable
-    if (webhookConfig.verificationToken) {
-      envVars.push(`# Token para webhook de ${webhookConfig.serviceName}`);
-      envVars.push(`${webhookConfig.serviceName.toUpperCase()}_WEBHOOK_SECRET=your_webhook_secret_here`);
-    }
-    
-    // Si no hay variables para añadir, no hacer nada
-    if (envVars.length === 0) {
-      return;
-    }
-    
-    // Si existe el archivo, añadir variables
-    if (await fs.exists(envPath)) {
-      const envContent = await fs.readFile(envPath, 'utf8');
-      
-      // Verificar si ya incluye las variables
-      if (!envContent.includes(`${webhookConfig.serviceName.toUpperCase()}_WEBHOOK_SECRET`)) {
-        const updatedContent = `${envContent}\n\n${envVars.join('\n')}\n`;
-        await fs.writeFile(envPath, updatedContent);
-        console.log(`Variables de entorno para webhook añadidas a .env.example`);
-      } else {
-        console.log('Variables de entorno para webhook ya existen en .env.example');
-      }
-    } else {
-      // Si no existe, crear el archivo
-      await fs.writeFile(envPath, envVars.join('\n') + '\n');
-      console.log(`Archivo .env.example creado con variables para webhook`);
-    }
-  }
-  
-  /**
-   * Interpreta la solicitud de un usuario y genera el componente apropiado
-   * @param {string} request - Solicitud del usuario en lenguaje natural
-   * @param {string} outputPath - Ruta donde se generará el proyecto
-   * @param {Object} options - Opciones adicionales
-   * @returns {Promise<Object>} - Resultado de la operación
-   */
-  async processNaturalLanguageRequest(request, outputPath, options = {}) {
-    try {
-      console.log(`Procesando solicitud: "${request}"`);
-      
-      // Analizar la solicitud con el agente de IA
-      const analysisPrompt = `
-        Analiza la siguiente solicitud del usuario y determina qué acción desea realizar:
-        "${request}"
-        
-        Posibles categorías:
-        1. Generar un proyecto completo o backend (identifica el tipo de proyecto)
-        2. Añadir un webhook (identifica el servicio, ej: WhatsApp, Twitch, Stripe)
-        3. Regenerar un proyecto existente (identifica el nombre)
-        4. Añadir un modelo específico
-        5. Añadir una funcionalidad específica
-        
-        Retorna SOLO un objeto JSON con la información extraída, sin explicaciones adicionales.
-        Ejemplo: { "action": "webhook", "service": "WhatsApp" }
-        Otro ejemplo: { "action": "generateProject", "type": "backend", "name": "ecommerce-api" }
+        También explica brevemente por qué haces cada recomendación.
       `;
       
-      const analysisJson = await this.agent.generateCode(
-        'request_analysis',
-        analysisPrompt,
-        { request }
-      );
+      // Consultar al agente
+      const recommendation = await this.agent.generateRecommendation(description, prompt);
       
-      // Extraer el objeto JSON de la respuesta
-      const jsonMatch = analysisJson.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        throw new Error('No se pudo interpretar la solicitud');
+      console.log('\n✅ Recomendaciones del agente recibidas');
+      console.log('📊 Resumen de recomendaciones:');
+      console.log(`  - Base de datos: ${recommendation.database}`);
+      console.log(`  - Framework: ${recommendation.framework}`);
+      console.log(`  - Autenticación: ${recommendation.auth}`);
+      console.log(`  - Incluir GraphQL: ${recommendation.includeGraphQL ? 'Sí' : 'No'}`);
+      console.log(`  - Incluir WebSockets: ${recommendation.includeWebsockets ? 'Sí' : 'No'}`);
+      
+      if (recommendation.recommendations && recommendation.recommendations.length > 0) {
+        console.log('\n💡 Recomendaciones específicas:');
+        recommendation.recommendations.forEach((rec, index) => {
+          console.log(`  ${index + 1}. ${rec}`);
+        });
       }
       
-      const analysis = JSON.parse(jsonMatch[0]);
-      
-      // Ejecutar la acción apropiada según el análisis
-      switch (analysis.action) {
-        case 'webhook':
-          if (!analysis.service) {
-            throw new Error('No se pudo determinar el servicio para el webhook');
-          }
-          return await this.generateWebhook(analysis.service, outputPath, options);
-          
-        case 'generateProject':
-        case 'backend':
-          return await this.generateCompleteProject(
-            analysis.description || request,
-            outputPath,
-            { 
-              ...options, 
-              ...analysis.options,
-              name: analysis.name || path.basename(outputPath)
-            }
-          );
-          
-        case 'regenerateProject':
-          if (!analysis.name) {
-            throw new Error('No se pudo determinar el nombre del proyecto a regenerar');
-          }
-          return await this.regenerateProjectFromDiagram(analysis.name, outputPath);
-          
-        // Añadir más casos según sea necesario
-          
-        default:
-          throw new Error(`Acción no soportada: ${analysis.action}`);
+      if (recommendation.suggestions && recommendation.suggestions.length > 0) {
+        console.log('\n📦 Paquetes recomendados:');
+        recommendation.suggestions.forEach((pkg, index) => {
+          console.log(`  ${index + 1}. ${pkg}`);
+        });
       }
+      
+      // Combinar las opciones del usuario con las recomendaciones
+      // Priorizar las opciones del usuario sobre las recomendaciones
+      const enrichedOptions = {
+        ...recommendation,
+        ...options
+      };
+      
+      return {
+        options: enrichedOptions,
+        recommendation
+      };
     } catch (error) {
-      console.error('Error al procesar solicitud en lenguaje natural:', error);
+      console.error('Error al interactuar con el agente:', error);
+      console.log('Continuando con las opciones proporcionadas por el usuario...');
+      return { options };
+    }
+  }
+
+  /**
+   * Genera una vista previa de la arquitectura y permite interactuar con el agente
+   * @param {string} description - Descripción del proyecto
+   * @param {Object} options - Opciones de generación
+   * @returns {Promise<Object>} - Resultado con la arquitectura y opciones actualizadas
+   */
+  async generatePreview(description, options = {}) {
+    try {
+      console.log('\n🔍 Generando vista previa de la arquitectura...');
+      
+      // Obtener recomendaciones del agente
+      const { options: enrichedOptions, recommendation } = await this.interactWithAgent(description, options);
+      
+      // Generar una arquitectura preliminar basada en la descripción y opciones
+      const previewPrompt = `
+        Genera una arquitectura preliminar para un proyecto con esta descripción:
+        "${description}"
+        
+        Configuraciones:
+        - Base de datos: ${enrichedOptions.database || 'MongoDB'}
+        - Framework: ${enrichedOptions.framework || 'Express'}
+        - Autenticación: ${enrichedOptions.auth || 'JWT'}
+        - GraphQL: ${enrichedOptions.includeGraphQL ? 'Sí' : 'No'}
+        
+        Incluye solo la estructura de carpetas y los archivos principales.
+        Responde con un objeto JSON que contenga 'folders' y 'files' donde 'files' solo debe incluir
+        los 5-10 archivos más importantes del proyecto.
+      `;
+      
+      const previewArchitecture = await this.agent.generateArchitecture(previewPrompt);
+      
+      // Mostrar la vista previa
+      console.log('\n📋 Vista previa de la arquitectura:');
+      console.log('\n📁 Carpetas principales:');
+      previewArchitecture.folders.slice(0, 10).forEach(folder => {
+        console.log(`  - ${folder.path} (${folder.description})`);
+      });
+      
+      if (previewArchitecture.folders.length > 10) {
+        console.log(`  ... y ${previewArchitecture.folders.length - 10} carpetas más`);
+      }
+      
+      console.log('\n📄 Archivos principales:');
+      previewArchitecture.files.slice(0, 10).forEach(file => {
+        console.log(`  - ${file.path} (${file.description})`);
+      });
+      
+      if (previewArchitecture.files.length > 10) {
+        console.log(`  ... y ${previewArchitecture.files.length - 10} archivos más`);
+      }
+      
+      return {
+        architecture: previewArchitecture,
+        options: enrichedOptions,
+        recommendation
+      };
+    } catch (error) {
+      console.error('Error al generar vista previa:', error);
       throw error;
     }
   }
 
   /**
-   * Determina el tipo de archivo basado en su ruta
-   * @param {string} filePath - Ruta del archivo
-   * @returns {string|null} Tipo de archivo (model, controller, route) o null
+   * Genera una API GraphQL basada en modelos existentes o en nuevos modelos según la descripción
+   * @param {string} description - Descripción de la API GraphQL
+   * @param {string} outputPath - Ruta donde se generará la API
+   * @param {Object} options - Opciones adicionales
+   * @returns {Promise<Object>} - Resultado de la generación
+   */
+  async generateGraphQLAPI(description, outputPath, options = {}) {
+    try {
+      console.log('\n🚀 Iniciando generación de API GraphQL...');
+      console.log(`💬 Descripción: "${description}"`);
+      console.log('⚙️ Configuración:');
+      console.log(`  - Base de datos: ${options.database || 'MongoDB'}`);
+      console.log(`  - Modelo de autenticación: ${options.auth || 'JWT'}`);
+      
+      // Determinar si usamos modelos existentes o generamos nuevos
+      let models = [];
+      let architecture = null;
+      
+      if (options.useExistingModels) {
+        console.log('🔍 Buscando modelos existentes en el proyecto...');
+        // Buscar modelos en la carpeta de modelos
+        const modelsDir = path.join(outputPath, 'models');
+        
+        if (await fs.pathExists(modelsDir)) {
+          const modelFiles = await fs.readdir(modelsDir);
+          
+          for (const modelFile of modelFiles) {
+            if (modelFile.endsWith('.js')) {
+              const modelName = path.basename(modelFile, '.js');
+              const modelPath = path.join(modelsDir, modelFile);
+              const modelContent = await fs.readFile(modelPath, 'utf8');
+              
+              models.push({
+                name: this._extractModelName(modelContent) || modelName.charAt(0).toUpperCase() + modelName.slice(1),
+                fields: this._extractModelFields(modelContent),
+                path: modelPath
+              });
+              
+              console.log(`  ✓ Modelo encontrado: ${modelName}`);
+            }
+          }
+        } else {
+          console.warn('❗ No se encontró carpeta de modelos. Se generarán modelos nuevos.');
+        }
+      }
+      
+      // Si no se encontraron modelos o no se usan modelos existentes, generar nuevos
+      if (models.length === 0) {
+        console.log('\n🧠 Generando modelos basados en la descripción...');
+        
+        // Solicitar al agente que genere modelos basados en la descripción
+        const modelsPrompt = `
+          Basado en esta descripción: "${description}"
+          
+          Genera un array de modelos para una API GraphQL. Cada modelo debe incluir:
+          - name: Nombre del modelo (PascalCase)
+          - fields: Array de objetos con propiedades name, type, required
+          
+          Los tipos deben ser compatibles con GraphQL (String, Int, Float, Boolean, ID).
+          Para relaciones, usa los tipos de los otros modelos.
+          
+          Ejemplo:
+          [
+            {
+              "name": "User",
+              "fields": [
+                {"name": "id", "type": "ID", "required": true},
+                {"name": "email", "type": "String", "required": true},
+                {"name": "posts", "type": "[Post]", "required": false}
+              ]
+            },
+            {
+              "name": "Post",
+              "fields": [
+                {"name": "id", "type": "ID", "required": true},
+                {"name": "title", "type": "String", "required": true},
+                {"name": "author", "type": "User", "required":true}
+              ]
+            }
+          ]
+          
+          Retorna SOLO un array JSON válido.
+        `;
+        
+        const modelsJsonString = await this.agent.generateCode(
+          'graphql_models',
+          modelsPrompt,
+          { description }
+        );
+        
+        // Extraer el array JSON de la respuesta
+        const jsonMatch = modelsJsonString.match(/\[[\s\S]*\]/);
+        if (jsonMatch) {
+          models = JSON.parse(jsonMatch[0]);
+          console.log(`✅ Se generaron ${models.length} modelos para la API GraphQL`);
+          
+          // Crear archivos de modelos si no existen
+          if (!await fs.pathExists(path.join(outputPath, 'models'))) {
+            await fs.ensureDir(path.join(outputPath, 'models'));
+          }
+          
+          for (const model of models) {
+            const modelPath = path.join(outputPath, 'models', `${model.name.toLowerCase()}.js`);
+            
+            // Solo crear el modelo si no existe
+            if (!await fs.pathExists(modelPath)) {
+              const modelCode = await this._generateModelCodeForGraphQL(model);
+              await fs.writeFile(modelPath, modelCode);
+              console.log(`  ✓ Modelo creado: ${model.name}`);
+            } else {
+              console.log(`  ℹ️ Modelo ya existe: ${model.name}`);
+            }
+          }
+        } else {
+          throw new Error('No se pudieron generar modelos a partir de la descripción');
+        }
+      }
+      
+      // Crear carpeta GraphQL si no existe
+      const graphqlDir = path.join(outputPath, 'graphql');
+      await fs.ensureDir(graphqlDir);
+      
+      console.log('\n📝 Generando archivos GraphQL...');
+      
+      // Datos del proyecto para la generación
+      const projectData = {
+        name: options.name || path.basename(outputPath),
+        models: models,
+        config: {
+          database: options.database || 'MongoDB',
+          auth: options.auth || 'JWT'
+        }
+      };
+      
+      // Generar los diferentes archivos de GraphQL
+      const graphqlFiles = await this.templateProcessor.generateGraphQLAPI(projectData);
+      
+      // Escribir los archivos generados
+      await fs.writeFile(path.join(graphqlDir, 'schema.graphql'), graphqlFiles.schema);
+      console.log(`  ✓ Schema GraphQL creado`);
+      
+      await fs.writeFile(path.join(graphqlDir, 'resolvers.js'), graphqlFiles.resolvers);
+      console.log(`  ✓ Resolvers creados`);
+      
+      await fs.writeFile(path.join(graphqlDir, 'server.js'), graphqlFiles.server);
+      console.log(`  ✓ Servidor GraphQL creado`);
+      
+      // Archivos adicionales si fueron generados
+      if (graphqlFiles.directives && graphqlFiles.directives !== '// No se pudieron generar directivas personalizadas') {
+        await fs.writeFile(path.join(graphqlDir, 'directives.js'), graphqlFiles.directives);
+        console.log(`  ✓ Directivas GraphQL creadas`);
+      }
+      
+      if (graphqlFiles.scalars && graphqlFiles.scalars !== '// No se pudieron generar escalares personalizados') {
+        await fs.writeFile(path.join(graphqlDir, 'scalars.js'), graphqlFiles.scalars);
+        console.log(`  ✓ Escalares GraphQL creados`);
+      }
+      
+      // Actualizar package.json para incluir dependencias de GraphQL
+      await this._updatePackageWithGraphQL(outputPath);
+      
+      // Actualizar app.js principal para integrar GraphQL si existe
+      await this._updateAppWithGraphQL(outputPath);
+      
+      console.log('\n🎉 API GraphQL generada con éxito!');
+      console.log(`📁 Ubicación: ${graphqlDir}`);
+      
+      return {
+        outputPath: graphqlDir,
+        models,
+        files: graphqlFiles
+      };
+    } catch (error) {
+      console.error('\n❌ Error al generar API GraphQL:', error);
+      throw error;
+    }
+  }
+  
+  /**
+   * Genera código para un modelo compatible con GraphQL
+   * @param {Object} model - Definición del modelo
+   * @returns {Promise<string>} - Código del modelo
    * @private
    */
-  _getFileTypeFromPath(filePath) {
-    const normalizedPath = filePath.toLowerCase();
-    if (normalizedPath.includes('/models/') || normalizedPath.includes('\\models\\')) {
-      return 'model';
+  async _generateModelCodeForGraphQL(model) {
+    // Convertir los campos del modelo al formato que espera Mongoose
+    const mongooseFields = model.fields.map(field => {
+      // Mapear tipos de GraphQL a tipos de Mongoose
+      let mongooseType = 'String';
+      let ref = null;
+      
+      switch (field.type) {
+        case 'ID':
+          mongooseType = 'Schema.Types.ObjectId';
+          break;
+        case 'Int':
+          mongooseType = 'Number';
+          break;
+        case 'Float':
+          mongooseType = 'Number';
+          break;
+        case 'Boolean':
+          mongooseType = 'Boolean';
+          break;
+        default:
+          // Comprobar si es un tipo personalizado o una relación
+          if (field.type.startsWith('[') && field.type.endsWith(']')) {
+            // Es un array
+            const innerType = field.type.substring(1, field.type.length - 1);
+            if (['String', 'Int', 'Float', 'Boolean', 'ID'].includes(innerType)) {
+              // Es un array de tipos primitivos
+              switch (innerType) {
+                case 'ID':
+                  mongooseType = '[Schema.Types.ObjectId]';
+                  break;
+                case 'Int':
+                case 'Float':
+                  mongooseType = '[Number]';
+                  break;
+                default:
+                  mongooseType = `[${innerType}]`;
+              }
+            } else {
+              // Es un array de referencias
+              mongooseType = '[Schema.Types.ObjectId]';
+              ref = innerType;
+            }
+          } else if (!['String', 'Int', 'Float', 'Boolean', 'ID'].includes(field.type)) {
+            // Es una referencia a otro modelo
+            mongooseType = 'Schema.Types.ObjectId';
+            ref = field.type;
+          }
+      }
+      
+      const fieldObj = {
+        name: field.name,
+        type: mongooseType,
+        required: field.required || false
+      };
+      
+      if (ref) {
+        fieldObj.ref = ref;
+      }
+      
+      return fieldObj;
+    });
+    
+    // Generar el modelo con los campos convertidos
+    const modelData = {
+      modelName: model.name,
+      fields: mongooseFields,
+      methods: [],
+      statics: []
+    };
+    
+    return await this.templateProcessor.generateModel(modelData);
+  }
+  
+  /**
+   * Actualiza package.json para incluir dependencias de GraphQL
+   * @param {string} outputPath - Ruta del proyecto
+   * @returns {Promise<void>}
+   * @private
+   */
+  async _updatePackageWithGraphQL(outputPath) {
+    const packagePath = path.join(outputPath, 'package.json');
+    
+    // Verificar si existe package.json
+    if (await fs.pathExists(packagePath)) {
+      console.log('📦 Actualizando package.json con dependencias de GraphQL...');
+      
+      try {
+        // Leer y parsear el package.json
+        const packageJson = JSON.parse(await fs.readFile(packagePath, 'utf8'));
+        
+        // Dependencias de GraphQL
+        const graphqlDeps = {
+          'apollo-server-express': '^3.6.0',
+          'apollo-server-core': '^3.6.0',
+          'graphql': '^16.2.0',
+          'graphql-scalars': '^1.14.1',
+          'dataloader': '^2.0.0'
+        };
+        
+        // Añadir dependencias si no existen
+        packageJson.dependencies = packageJson.dependencies || {};
+        let depsAdded = false;
+        
+        for (const [dep, version] of Object.entries(graphqlDeps)) {
+          if (!packageJson.dependencies[dep]) {
+            packageJson.dependencies[dep] = version;
+            depsAdded = true;
+          }
+        }
+        
+        // Añadir scripts para GraphQL si no existen
+        packageJson.scripts = packageJson.scripts || {};
+        if (!packageJson.scripts['start:graphql']) {
+          packageJson.scripts['start:graphql'] = 'node graphql/server.js';
+          depsAdded = true;
+        }
+        
+        // Guardar el package.json actualizado
+        if (depsAdded) {
+          await fs.writeFile(packagePath, JSON.stringify(packageJson, null, 2));
+          console.log('  ✓ package.json actualizado con dependencias de GraphQL');
+        } else {
+          console.log('  ℹ️ package.json ya contiene dependencias de GraphQL');
+        }
+      } catch (error) {
+        console.error('  ❌ Error al actualizar package.json:', error.message);
+      }
+    } else {
+      console.log('  ⚠️ No se encontró package.json para actualizar');
+      
+      // Si no existe, crear uno básico con las dependencias necesarias
+      const basicPackage = {
+        name: path.basename(outputPath),
+        version: '1.0.0',
+        description: 'API GraphQL generada automáticamente',
+        main: 'graphql/server.js',
+        scripts: {
+          'start': 'node graphql/server.js',
+          'dev': 'nodemon graphql/server.js'
+        },
+        dependencies: {
+          'apollo-server-express': '^3.6.0',
+          'apollo-server-core': '^3.6.0',
+          'express': '^4.17.2',
+          'graphql': '^16.2.0',
+          'mongoose': '^6.1.6',
+          'dotenv': '^10.0.0',
+          'graphql-scalars': '^1.14.1',
+          'dataloader': '^2.0.0'
+        }
+      };
+      
+      await fs.writeFile(packagePath, JSON.stringify(basicPackage, null, 2));
+      console.log('  ✓ package.json creado con dependencias de GraphQL');
     }
-    if (normalizedPath.includes('/controllers/') || normalizedPath.includes('\\controllers\\')) {
-      return 'controller';
+  }
+  
+  /**
+   * Actualiza app.js para integrar GraphQL si existe
+   * @param {string} outputPath - Ruta del proyecto
+   * @returns {Promise<void>}
+   * @private
+   */
+  async _updateAppWithGraphQL(outputPath) {
+    const appPath = path.join(outputPath, 'app.js');
+    
+    // Verificar si existe app.js
+    if (await fs.pathExists(appPath)) {
+      console.log('🔄 Actualizando app.js para integrar GraphQL...');
+      
+      try {
+        // Leer el contenido de app.js
+        const appContent = await fs.readFile(appPath, 'utf8');
+        
+        // Verificar si ya incluye GraphQL
+        if (appContent.includes('apollo') || appContent.includes('graphql')) {
+          console.log('  ℹ️ app.js ya incluye integración con GraphQL');
+          return;
+        }
+        
+        // Buscar puntos de integración
+        let updatedContent = appContent;
+        
+        // 1. Añadir importaciones necesarias
+        if (updatedContent.includes('const express = require')) {
+          updatedContent = updatedContent.replace(
+            'const express = require(\'express\');',
+            'const express = require(\'express\');\n' +
+            '// Importar configuración de Apollo Server\n' +
+            'const { startApolloServer } = require(\'./graphql/server\');'
+          );
+        }
+        
+        // 2. Añadir inicialización de Apollo Server
+        if (updatedContent.includes('module.exports = app;')) {
+          updatedContent = updatedContent.replace(
+            'module.exports = app;',
+            '// Iniciar Apollo Server para GraphQL\n' +
+            'startApolloServer(app)\n' +
+            '  .then(({ server }) => {\n' +
+            '    console.log(`🚀 Servidor GraphQL listo en ${server.graphqlPath}`);\n' +
+            '  })\n' +
+            '  .catch(err => {\n' +
+            '    console.error(\'Error al iniciar Apollo Server:\', err);\n' +
+            '  });\n\n' +
+            'module.exports = app;'
+          );
+        } else if (updatedContent.includes('app.listen(')) {
+          // Si hay un app.listen, reemplazarlo con la versión de Apollo
+          const listenRegex = /(app\.listen\(\s*.*\s*,\s*.*\s*\{[\s\S]*?\}\);)/;
+          const listenMatch = updatedContent.match(listenRegex);
+          
+          if (listenMatch) {
+            updatedContent = updatedContent.replace(
+              listenMatch[0],
+              '// Iniciar Apollo Server para GraphQL\n' +
+              'startApolloServer(app)\n' +
+              '  .then(({ server, httpServer }) => {\n' +
+              '    console.log(`🚀 Servidor GraphQL listo en ${server.graphqlPath}`);\n' +
+              '  })\n' +
+              '  .catch(err => {\n' +
+              '    console.error(\'Error al iniciar Apollo Server:\', err);\n' +
+              '  });'
+            );
+          }
+        }
+        
+        // Guardar el archivo actualizado
+        await fs.writeFile(appPath, updatedContent);
+        console.log('  ✓ app.js actualizado para integrar GraphQL');
+      } catch (error) {
+        console.error('  ❌ Error al actualizar app.js:', error.message);
+      }
+    } else {
+      console.log('  ℹ️ No se encontró app.js para integrar GraphQL');
     }
-    if (normalizedPath.includes('/routes/') || normalizedPath.includes('\\routes\\')) {
-      return 'route';
+  }
+  
+  /**
+   * Extrae el nombre del modelo de un archivo de modelo existente
+   * @param {string} modelContent - Contenido del archivo de modelo
+   * @returns {string|null} - Nombre del modelo o null
+   * @private
+   */
+  _extractModelName(modelContent) {
+    // Buscar definición de modelo como "const UserSchema = new mongoose.Schema"
+    const schemaMatch = modelContent.match(/const\s+(\w+)Schema\s*=\s*new\s+mongoose\.Schema/);
+    if (schemaMatch) {
+      return schemaMatch[1];
     }
+    
+    // Buscar "const User = mongoose.model('User'"
+    const modelMatch = modelContent.match(/const\s+(\w+)\s*=\s*mongoose\.model\s*\(\s*['"](\w+)['"]/);
+    if (modelMatch) {
+      return modelMatch[2]; // Usar el nombre entre comillas
+    }
+    
     return null;
   }
   
   /**
-   * Extrae el nombre del modelo de la ruta del archivo
-   * @param {string} filePath - Ruta del archivo
-   * @returns {string} Nombre del modelo en formato PascalCase
+   * Extrae los campos de un archivo de modelo existente
+   * @param {string} modelContent - Contenido del archivo de modelo
+   * @returns {Array} - Array de objetos con los campos
    * @private
    */
-  _getModelNameFromPath(filePath) {
-    const fileName = path.basename(filePath, path.extname(filePath));
-    // Convertir a PascalCase (primera letra mayúscula)
-    return fileName.charAt(0).toUpperCase() + fileName.slice(1);
-  }
-  
-  /**
-   * Extrae el nombre del archivo del modelo de la ruta
-   * @param {string} filePath - Ruta del archivo
-   * @returns {string} Nombre del archivo del modelo
-   * @private
-   */
-  _getModelFileNameFromPath(filePath) {
-    return path.basename(filePath, path.extname(filePath));
-  }
-  
-  /**
-   * Genera los campos para un modelo basado en la descripción
-   * @param {string} modelDescription - Descripción del modelo
-   * @param {Object} context - Contexto del proyecto
-   * @returns {Promise<Array>} Array con los campos del modelo
-   * @private
-   */
-  async _generateModelFields(modelDescription, context) {
-    const prompt = `
-      Basado en esta descripción: "${modelDescription}"
-      
-      Genera un array de campos para un modelo de mongoose.
-      Cada campo debe tener las propiedades: name, type, required, unique y default (opcional).
-      Los tipos válidos son: String, Number, Boolean, Date, ObjectId, etc.
-      
-      Retorna SOLO un array JSON válido sin explicaciones adicionales.
-    `;
+  _extractModelFields(modelContent) {
+    const fields = [];
     
     try {
-      const fieldsJson = await this.agent.generateCode(
-        'model_fields', 
-        prompt, 
-        context
-      );
+      // Buscar el objeto de esquema
+      const schemaMatch = modelContent.match(/new\s+mongoose\.Schema\s*\(\s*\{([\s\S]*?)\}\s*,/);
+      if (!schemaMatch) return fields;
       
-      const fieldsMatch = fieldsJson.match(/\[[\s\S]*\]/);
-      if (fieldsMatch) {
-        return JSON.parse(fieldsMatch[0]);
+      const schemaContent = schemaMatch[1];
+      
+      // Buscar campos individuales en el formato: fieldName: { type: Type, ... }
+      const fieldRegex = /(\w+)\s*:\s*\{([\s\S]*?)\}/g;
+      let match;
+      
+      while ((match = fieldRegex.exec(schemaContent)) !== null) {
+        const fieldName = match[1];
+        const fieldContent = match[2];
+        
+        // Determinar el tipo del campo
+        let fieldType = 'String'; // Tipo predeterminado
+        
+        // Buscar tipo: type: String, type: Number, etc.
+        const typeMatch = fieldContent.match(/type\s*:\s*([\w\.]+)/);
+        if (typeMatch) {
+          // Mapear tipos Mongoose a GraphQL
+          const mongooseType = typeMatch[1];
+          switch (mongooseType) {
+            case 'String':
+              fieldType = 'String';
+              break;
+            case 'Number':
+              fieldType = 'Float';
+              break;
+            case 'Boolean':
+              fieldType = 'Boolean';
+              break;
+            case 'Date':
+              fieldType = 'String'; // Usar String para fechas en GraphQL
+              break;
+            case 'Schema.Types.ObjectId':
+            case 'mongoose.Schema.Types.ObjectId':
+              // Buscar referencia
+              const refMatch = fieldContent.match(/ref\s*:\s*['"]([\w]+)['"]/);
+              if (refMatch) {
+                fieldType = refMatch[1]; // Tipo es el nombre del modelo referenciado
+              } else {
+                fieldType = 'ID';
+              }
+              break;
+            default:
+              // Arrays o tipos personalizados
+              if (mongooseType.includes('[')) {
+                fieldType = '[String]'; // Predeterminado para arrays
+              } else {
+                fieldType = 'String';
+              }
+          }
+        }
+        
+        // Determinar si es requerido
+        const isRequired = fieldContent.includes('required: true');
+        
+        fields.push({
+          name: fieldName,
+          type: fieldType,
+          required: isRequired
+        });
       }
-      
-      return [];
     } catch (error) {
-      console.error('Error al generar campos del modelo:', error);
-      return [
-        { name: 'name', type: 'String', required: true },
-        { name: 'description', type: 'String', required: false },
-        { name: 'createdAt', type: 'Date', default: 'Date.now' }
-      ];
+      console.error('Error al extraer campos del modelo:', error);
     }
-  }
-  
-  /**
-   * Genera métodos para un modelo basado en la descripción
-   * @param {string} modelDescription - Descripción del modelo
-   * @param {Object} context - Contexto del proyecto
-   * @returns {Promise<Array>} Array con los métodos del modelo
-   * @private
-   */
-  async _generateModelMethods(modelDescription, context) {
-    const prompt = `
-      Basado en esta descripción: "${modelDescription}"
-      
-      Sugiere nombres de métodos útiles para este modelo.
-      Estos métodos serán implementados después.
-      
-      Retorna SOLO un array JSON con los nombres de los métodos, sin código de implementación.
-      Ejemplo: ["findByName", "calculateTotal"]
-    `;
     
-    try {
-      const methodsJson = await this.agent.generateCode(
-        'model_methods', 
-        prompt, 
-        context
-      );
-      
-      const methodsMatch = methodsJson.match(/\[[\s\S]*\]/);
-      if (methodsMatch) {
-        const methodNames = JSON.parse(methodsMatch[0]);
-        return methodNames.map(name => ({ name }));
-      }
-      
-      return [];
-    } catch (error) {
-      console.error('Error al generar métodos del modelo:', error);
-      return [];
-    }
+    return fields;
   }
 }
 

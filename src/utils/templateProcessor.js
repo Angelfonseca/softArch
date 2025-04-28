@@ -199,394 +199,401 @@ class TemplateProcessor {
   }
   
   /**
-   * Genera código adicional para la funcionalidad de consulta global
-   * @returns {Promise<string>} Código adicional para globalQuery
-   * @private
+   * Genera código para un esquema GraphQL
+   * @param {Object} schemaData - Datos para generar el esquema
+   * @returns {Promise<string>} Código del esquema GraphQL generado
    */
-  async _generateAdditionalGlobalQueryCode() {
-    const prompt = `
-      Genera código adicional para mejorar la funcionalidad de consulta global.
-      
-      Estas funcionalidades podrían incluir:
-      - Métodos para exportar datos (CSV, JSON, Excel)
-      - Funciones de búsqueda avanzada
-      - Métodos para realizar operaciones en lote
-      - Estadísticas o agregaciones sobre los datos
-      
-      Retorna SOLO el código adicional, sin incluir las rutas básicas
-      que ya están definidas.
-    `;
-    
+  async generateGraphQLSchema(schemaData) {
     try {
-      const code = await this.agent.generateCode(
-        'globalQuery_additional', 
-        prompt, 
-        {}
-      );
-      return code;
+      // Intentar cargar la plantilla de esquema GraphQL
+      let template;
+      
+      try {
+        template = await this.loadHbsTemplate('graphql', 'schema');
+      } catch (error) {
+        console.log('Plantilla de esquema GraphQL no encontrada, generando con IA');
+        // Si no existe la plantilla, generar el código completo con IA
+        return await this._generateGraphQLSchemaWithAI(schemaData);
+      }
+      
+      // Generar código adicional específico para este esquema con IA
+      const aiCode = await this._generateAdditionalGraphQLSchemaCode(schemaData);
+      
+      // Reemplazar marcador con código IA
+      const processedTemplate = TemplateProcessor.processTemplate(template, schemaData);
+      return processedTemplate.replace('# [IA_GENERATED_CODE]', aiCode);
     } catch (error) {
-      console.error('Error al generar código adicional para globalQuery:', error);
-      return '// No se pudo generar código adicional';
+      console.error('Error al generar esquema GraphQL:', error);
+      return '# Error al generar esquema GraphQL';
     }
   }
   
   /**
-   * Genera código personalizado adicional para un controlador
-   * @param {Object} controllerData - Datos del controlador
-   * @returns {Promise<string>} Código adicional para el controlador
+   * Genera código adicional para el esquema GraphQL
+   * @param {Object} schemaData - Datos del esquema
+   * @returns {Promise<string>} Código adicional para el esquema
    * @private
    */
-  async _generateAdditionalControllerCode(controllerData) {
+  async _generateAdditionalGraphQLSchemaCode(schemaData) {
     const prompt = `
-      Genera métodos adicionales para el controlador "${controllerData.modelName}Controller".
-      Estos métodos deben complementar las operaciones CRUD básicas.
-      Por ejemplo, podrían incluir búsquedas avanzadas, filtrado, paginación,
-      o cualquier operación específica para este tipo de entidad.
+      Genera definiciones de tipos adicionales para un esquema GraphQL basado en estos modelos:
+      ${JSON.stringify(schemaData.models)}
       
-      No incluyas los métodos básicos (getAll, getById, create, update, delete) 
-      que ya están definidos.
+      Incluye:
+      - Tipos de entrada (Input)
+      - Tipos de retorno para consultas específicas
+      - Enumeraciones relevantes
+      - Interfaces que podrían ser útiles
       
-      Retorna SOLO el código de los nuevos métodos, sin incluir la declaración 
-      del objeto controlador ni el module.exports.
+      No incluyas los tipos básicos del modelo que ya están definidos.
+      Retorna SOLO el código GraphQL para las definiciones adicionales.
     `;
     
     try {
       const code = await this.agent.generateCode(
-        `${controllerData.modelName}Controller_additional`, 
-        prompt, 
-        controllerData
+        'graphql_schema_additional',
+        prompt,
+        schemaData
       );
       return code;
     } catch (error) {
-      console.error('Error al generar código adicional para controlador:', error);
-      return '// No se pudo generar código adicional';
+      console.error('Error al generar código adicional para esquema GraphQL:', error);
+      return '# No se pudo generar código adicional';
     }
   }
   
   /**
-   * Genera código personalizado adicional para rutas
-   * @param {Object} routeData - Datos de la ruta
-   * @returns {Promise<string>} Código adicional para las rutas
+   * Genera código para resolvers de GraphQL
+   * @param {Object} resolverData - Datos para generar los resolvers
+   * @returns {Promise<string>} Código de resolvers GraphQL generado
+   */
+  async generateGraphQLResolvers(resolverData) {
+    try {
+      // Intentar cargar la plantilla de resolvers GraphQL
+      let template;
+      
+      try {
+        template = await this.loadHbsTemplate('graphql', 'resolvers');
+      } catch (error) {
+        console.log('Plantilla de resolvers GraphQL no encontrada, generando con IA');
+        // Si no existe la plantilla, generar el código completo con IA
+        return await this._generateGraphQLResolversWithAI(resolverData);
+      }
+      
+      // Generar código adicional específico para estos resolvers con IA
+      const aiCode = await this._generateAdditionalGraphQLResolverCode(resolverData);
+      
+      // Reemplazar marcador con código IA
+      const processedTemplate = TemplateProcessor.processTemplate(template, resolverData);
+      return processedTemplate.replace('// [IA_GENERATED_CODE]', aiCode);
+    } catch (error) {
+      console.error('Error al generar resolvers GraphQL:', error);
+      return '// Error al generar resolvers GraphQL';
+    }
+  }
+  
+  /**
+   * Genera código adicional para los resolvers GraphQL
+   * @param {Object} resolverData - Datos de los resolvers
+   * @returns {Promise<string>} Código adicional para los resolvers
    * @private
    */
-  async _generateAdditionalRouteCode(routeData) {
+  async _generateAdditionalGraphQLResolverCode(resolverData) {
     const prompt = `
-      Genera rutas adicionales para el recurso "${routeData.modelName}".
-      Estas rutas deben complementar las operaciones CRUD básicas.
-      Por ejemplo, podrían incluir rutas para búsquedas avanzadas, 
-      filtrado, paginación, o cualquier operación específica.
+      Genera implementaciones adicionales para los resolvers GraphQL basado en estos modelos:
+      ${JSON.stringify(resolverData.models)}
       
-      No incluyas las rutas básicas (GET /, GET /:id, POST /, PUT /:id, DELETE /:id) 
-      que ya están definidas.
+      Incluye:
+      - Resolvers para consultas complejas
+      - Resolvers para campos computados
+      - Resolvers para relaciones entre entidades
+      - Lógica para mutaciones específicas
       
-      Usa el controlador "${routeData.modelName}Controller" con métodos adicionales
-      que hayas definido.
-      
-      Retorna SOLO el código de las nuevas rutas, sin incluir la definición
-      del router ni el module.exports.
+      No incluyas los resolvers básicos (query y mutation para operaciones CRUD) que ya están definidos.
+      Retorna SOLO el código JavaScript para los resolvers adicionales.
     `;
     
     try {
       const code = await this.agent.generateCode(
-        `${routeData.modelName}Routes_additional`, 
-        prompt, 
-        routeData
+        'graphql_resolvers_additional',
+        prompt,
+        resolverData
       );
       return code;
     } catch (error) {
-      console.error('Error al generar código adicional para rutas:', error);
+      console.error('Error al generar código adicional para resolvers GraphQL:', error);
       return '// No se pudo generar código adicional';
+    }
+  }
+
+  /**
+   * Genera el archivo principal para configurar Apollo Server o similar
+   * @param {Object} graphqlData - Datos para la configuración de GraphQL
+   * @returns {Promise<string>} Código de configuración GraphQL generado
+   */
+  async generateGraphQLServer(graphqlData) {
+    try {
+      // Intentar cargar la plantilla de servidor GraphQL
+      let template;
+      
+      try {
+        template = await this.loadHbsTemplate('graphql', 'server');
+      } catch (error) {
+        console.log('Plantilla de servidor GraphQL no encontrada, generando con IA');
+        // Si no existe la plantilla, generar el código completo con IA
+        return await this._generateGraphQLServerWithAI(graphqlData);
+      }
+      
+      // Generar código adicional específico para el servidor con IA
+      const aiCode = await this._generateAdditionalGraphQLServerCode(graphqlData);
+      
+      // Reemplazar marcador con código IA
+      const processedTemplate = TemplateProcessor.processTemplate(template, graphqlData);
+      return processedTemplate.replace('// [IA_GENERATED_CODE]', aiCode);
+    } catch (error) {
+      console.error('Error al generar servidor GraphQL:', error);
+      return '// Error al generar servidor GraphQL';
     }
   }
   
   /**
-   * Genera código personalizado adicional para la aplicación principal
-   * @param {Object} appData - Datos de la aplicación
-   * @returns {Promise<string>} Código adicional para la aplicación
+   * Genera código adicional para el servidor GraphQL
+   * @param {Object} graphqlData - Datos del servidor
+   * @returns {Promise<string>} Código adicional para el servidor
    * @private
    */
-  async _generateAdditionalAppCode(appData) {
+  async _generateAdditionalGraphQLServerCode(graphqlData) {
     const prompt = `
-      Genera código adicional para la aplicación Express.
-      Este código puede incluir configuraciones adicionales, middleware 
-      personalizado, o cualquier otra funcionalidad que consideres útil.
+      Genera código adicional para la configuración de un servidor Apollo GraphQL.
       
-      Ejemplos de código que podrías generar:
-      - Configuración de seguridad (helmet, rate limiting)
+      Incluye:
+      - Configuración de middleware para autenticación
+      - Plugins útiles para monitoreo o caching
+      - Configuración de directivas personalizadas
       - Manejo avanzado de errores
-      - Logging
-      - Documentación automática (Swagger/OpenAPI)
-      - Compresión de respuestas
       
       No incluyas la configuración básica que ya está definida.
-      
-      Retorna SOLO el código adicional, sin incluir las partes que ya existen.
+      Retorna SOLO el código JavaScript adicional.
     `;
     
     try {
       const code = await this.agent.generateCode(
-        'app_additional', 
-        prompt, 
-        appData
+        'graphql_server_additional',
+        prompt,
+        graphqlData
       );
       return code;
     } catch (error) {
-      console.error('Error al generar código adicional para la aplicación:', error);
+      console.error('Error al generar código adicional para servidor GraphQL:', error);
       return '// No se pudo generar código adicional';
     }
   }
-  
+
   /**
-   * Genera un archivo completo usando el agente de IA
-   * @param {string} filePath - Ruta del archivo en el proyecto
-   * @param {string} description - Descripción del archivo
-   * @param {Object} context - Contexto del proyecto
-   * @returns {Promise<string>} Código generado
+   * Genera un esquema GraphQL completo usando IA
+   * @param {Object} schemaData - Datos del esquema
+   * @returns {Promise<string>} Esquema GraphQL completo generado
+   * @private
    */
-  async generateCompleteFile(filePath, description, context) {
+  async _generateGraphQLSchemaWithAI(schemaData) {
+    const prompt = `
+      Genera un esquema GraphQL completo para los siguientes modelos:
+      ${JSON.stringify(schemaData.models)}
+      
+      El esquema debe incluir:
+      - Tipos para cada modelo (Type)
+      - Tipos de entrada para mutaciones (Input)
+      - Enumeraciones relevantes
+      - Interfaces si es necesario
+      - Definición de Query con todas las consultas necesarias
+      - Definición de Mutation con todas las operaciones necesarias
+      
+      Usa buenas prácticas de GraphQL y asegúrate de que la sintaxis sea válida.
+      Retorna SOLO el código GraphQL sin explicaciones adicionales.
+    `;
+    
     try {
-      return await this.agent.generateCode(filePath, description, context);
+      return await this.agent.generateCode(
+        'graphql_schema',
+        prompt,
+        schemaData
+      );
     } catch (error) {
-      console.error(`Error al generar archivo completo para ${filePath}:`, error);
+      console.error('Error al generar esquema GraphQL con IA:', error);
       throw error;
     }
   }
 
   /**
-   * Genera código para un webhook específico
-   * @param {Object} webhookData - Datos del webhook a generar
-   * @returns {Promise<string>} - Código generado para el webhook
-   */
-  async generateWebhook(webhookData) {
-    try {
-      // Cargar la plantilla de webhook
-      const template = await this.loadHbsTemplate('backend', 'webhook');
-      
-      // Generar código adicional específico para el webhook
-      const aiCode = await this._generateWebhookImplementation(webhookData);
-      
-      // Procesar la plantilla
-      const processedTemplate = TemplateProcessor.processTemplate(template, webhookData);
-      
-      // Reemplazar marcador con código IA
-      return processedTemplate.replace('// [IA_GENERATED_CODE]', aiCode);
-    } catch (error) {
-      console.error(`Error al generar webhook para ${webhookData.serviceName}:`, error);
-      
-      // Si hay error al cargar la plantilla, generar el código completamente con IA
-      try {
-        return await this.agent.generateCode(
-          `routes/webhooks/${webhookData.serviceName.toLowerCase()}Webhook.js`,
-          `Implementa un webhook para ${webhookData.serviceName} que maneje los siguientes eventos: ${webhookData.eventTypes.map(e => e.name).join(', ')}. Incluye verificación de seguridad y manejo de errores.`,
-          webhookData
-        );
-      } catch (aiError) {
-        console.error(`Error al generar webhook con IA para ${webhookData.serviceName}:`, aiError);
-        throw error;
-      }
-    }
-  }
-  
-  /**
-   * Genera la implementación específica para un servicio de webhook
-   * @param {Object} webhookData - Datos del webhook
-   * @returns {Promise<string>} - Código generado
+   * Genera resolvers GraphQL completos usando IA
+   * @param {Object} resolverData - Datos de los resolvers
+   * @returns {Promise<string>} Resolvers GraphQL completos generados
    * @private
    */
-  async _generateWebhookImplementation(webhookData) {
+  async _generateGraphQLResolversWithAI(resolverData) {
     const prompt = `
-      Genera código para implementar las funciones de manejo de eventos para un webhook de ${webhookData.serviceName}.
+      Genera resolvers completos para GraphQL basados en los siguientes modelos:
+      ${JSON.stringify(resolverData.models)}
       
-      Los tipos de eventos que debe manejar son:
-      ${webhookData.eventTypes.map(e => `- ${e.name}: ${e.description}`).join('\n')}
+      Los resolvers deben incluir:
+      - Implementación de todas las consultas (Query)
+      - Implementación de todas las mutaciones (Mutation)
+      - Resolvers para campos relacionados entre entidades
+      - Resolvers para campos computados o complejos
       
-      El código debe incluir:
-      - Implementación detallada de cada función de manejo de eventos
-      - Procesamiento apropiado de los datos del payload
-      - Actualización de bases de datos o notificaciones según sea necesario
-      - Manejo de errores
-      
-      Retorna SOLO el código de implementación, sin incluir la definición del router ni el module.exports.
+      Usa MongoDB/Mongoose para las operaciones de base de datos.
+      Incluye manejo de errores y validaciones básicas.
+      Retorna SOLO el código JavaScript sin explicaciones adicionales.
     `;
     
     try {
-      const code = await this.agent.generateCode(
-        `${webhookData.serviceName.toLowerCase()}_webhook_implementation`,
+      return await this.agent.generateCode(
+        'graphql_resolvers',
         prompt,
-        webhookData
+        resolverData
       );
-      return code;
     } catch (error) {
-      console.error(`Error al generar implementación para webhook de ${webhookData.serviceName}:`, error);
-      return '// No se pudo generar código de implementación';
+      console.error('Error al generar resolvers GraphQL con IA:', error);
+      throw error;
     }
   }
-  
+
   /**
-   * Genera configuración de webhook basada en el nombre del servicio
-   * @param {string} serviceName - Nombre del servicio (WhatsApp, Twitch, etc.)
-   * @returns {Promise<Object>} - Configuración del webhook
-   */
-  async generateWebhookConfig(serviceName) {
-    const normalizedService = serviceName.toLowerCase();
-    
-    // Configuraciones predefinidas para servicios comunes
-    const commonConfigs = {
-      whatsapp: {
-        serviceName: 'WhatsApp',
-        description: 'Maneja eventos de mensajería de WhatsApp Business API',
-        verificationToken: true,
-        signatureMethod: 'hmac',
-        signatureHeader: 'x-hub-signature-256',
-        hashAlgorithm: 'sha256',
-        digestFormat: 'hex',
-        signaturePrefix: 'sha256=',
-        eventTypeField: 'entry[0].changes[0].field',
-        eventTypes: [
-          { name: 'Message', type: 'messages', description: 'Mensaje recibido de un usuario' },
-          { name: 'StatusUpdate', type: 'message_status_update', description: 'Actualización de estado de mensaje' },
-          { name: 'OptIn', type: 'opt_in', description: 'Usuario ha optado por recibir mensajes' }
-        ]
-      },
-      twitch: {
-        serviceName: 'Twitch',
-        description: 'Maneja eventos de la API de webhooks de Twitch',
-        verificationToken: true,
-        signatureMethod: 'hmac',
-        signatureHeader: 'twitch-eventsub-message-signature',
-        hashAlgorithm: 'sha256',
-        digestFormat: 'hex',
-        signaturePrefix: 'sha256=',
-        eventTypeField: 'subscription.type',
-        challenge: true,
-        challengeParam: 'hub.challenge',
-        eventTypes: [
-          { name: 'StreamOnline', type: 'stream.online', description: 'Stream comenzó' },
-          { name: 'StreamOffline', type: 'stream.offline', description: 'Stream terminó' },
-          { name: 'ChannelFollow', type: 'channel.follow', description: 'Usuario siguió el canal' },
-          { name: 'ChannelSubscription', type: 'channel.subscribe', description: 'Usuario se suscribió al canal' }
-        ]
-      },
-      github: {
-        serviceName: 'GitHub',
-        description: 'Maneja eventos de GitHub webhooks',
-        verificationToken: true,
-        signatureMethod: 'hmac',
-        signatureHeader: 'x-hub-signature-256',
-        hashAlgorithm: 'sha256',
-        digestFormat: 'hex',
-        signaturePrefix: 'sha256=',
-        eventTypeField: 'headers[\'x-github-event\']',
-        eventTypes: [
-          { name: 'Push', type: 'push', description: 'Código enviado al repositorio' },
-          { name: 'PullRequest', type: 'pull_request', description: 'Pull request creado o actualizado' },
-          { name: 'Issue', type: 'issues', description: 'Issue creado o actualizado' }
-        ]
-      },
-      stripe: {
-        serviceName: 'Stripe',
-        description: 'Maneja eventos de pagos de Stripe',
-        verificationToken: true,
-        signatureMethod: 'hmac',
-        signatureHeader: 'stripe-signature',
-        hashAlgorithm: 'sha256',
-        digestFormat: 'hex',
-        eventTypeField: 'type',
-        eventTypes: [
-          { name: 'PaymentIntent', type: 'payment_intent.succeeded', description: 'Pago completado exitosamente' },
-          { name: 'PaymentFailed', type: 'payment_intent.payment_failed', description: 'Pago fallido' },
-          { name: 'CustomerSubscription', type: 'customer.subscription.created', description: 'Suscripción creada' }
-        ]
-      },
-      slack: {
-        serviceName: 'Slack',
-        description: 'Maneja eventos de la API de Slack',
-        verificationToken: true,
-        signatureMethod: 'hmac',
-        signatureHeader: 'x-slack-signature',
-        hashAlgorithm: 'sha256',
-        digestFormat: 'hex',
-        signaturePrefix: 'v0=',
-        eventTypeField: 'event.type',
-        challenge: true,
-        challengeParam: 'challenge',
-        eventTypes: [
-          { name: 'Message', type: 'message', description: 'Mensaje publicado en un canal' },
-          { name: 'AppMention', type: 'app_mention', description: 'La app fue mencionada en un mensaje' },
-          { name: 'ReactionAdded', type: 'reaction_added', description: 'Reacción añadida a un mensaje' }
-        ]
-      }
-    };
-    
-    // Buscar configuración predefinida
-    for (const [service, config] of Object.entries(commonConfigs)) {
-      if (normalizedService.includes(service)) {
-        return config;
-      }
-    }
-    
-    // Si no se encuentra una configuración predefinida, generar con IA
-    return this._generateCustomWebhookConfig(serviceName);
-  }
-  
-  /**
-   * Genera una configuración personalizada para un servicio de webhook no predefinido
-   * @param {string} serviceName - Nombre del servicio
-   * @returns {Promise<Object>} - Configuración del webhook
+   * Genera configuración de servidor GraphQL completa usando IA
+   * @param {Object} graphqlData - Datos de configuración
+   * @returns {Promise<string>} Configuración del servidor GraphQL generada
    * @private
    */
-  async _generateCustomWebhookConfig(serviceName) {
+  async _generateGraphQLServerWithAI(graphqlData) {
     const prompt = `
-      Genera una configuración de webhook para el servicio "${serviceName}".
+      Genera un archivo de configuración completo para un servidor Apollo GraphQL.
       
       La configuración debe incluir:
-      - Nombre del servicio
-      - Descripción breve
-      - Si requiere token de verificación
-      - Método de verificación de firma (hmac, token, etc.)
-      - Campos necesarios para verificación
-      - Campo para identificar el tipo de evento
-      - Lista de tipos de eventos comunes para este servicio
+      - Importación de los esquemas y resolvers
+      - Configuración de Apollo Server
+      - Integración con Express
+      - Middleware para autenticación
+      - Manejo de errores
+      - Playground/GraphiQL para desarrollo
       
-      Retorna SOLO un objeto JSON con la configuración, sin explicaciones adicionales.
+      Usa las mejores prácticas actuales para Apollo Server.
+      Retorna SOLO el código JavaScript sin explicaciones adicionales.
     `;
     
     try {
-      const configJson = await this.agent.generateCode(
-        `${serviceName.toLowerCase()}_webhook_config`,
+      return await this.agent.generateCode(
+        'graphql_server',
         prompt,
-        { serviceName }
+        graphqlData
       );
+    } catch (error) {
+      console.error('Error al generar servidor GraphQL con IA:', error);
+      throw error;
+    }
+  }
+  
+  /**
+   * Genera código completo para implementar GraphQL en el proyecto
+   * @param {Object} projectData - Datos del proyecto
+   * @returns {Promise<Object>} Objeto con los diferentes archivos generados
+   */
+  async generateGraphQLAPI(projectData) {
+    try {
+      console.log('Generando API GraphQL...');
       
-      // Extraer el objeto JSON de la respuesta
-      const jsonMatch = configJson.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        return JSON.parse(jsonMatch[0]);
-      }
+      // Preparar los datos necesarios para la generación
+      const graphqlData = {
+        projectName: projectData.name || 'api',
+        models: projectData.models || [],
+        config: projectData.config || {}
+      };
       
-      // Si no se puede extraer JSON, usar una configuración genérica
+      // Generar los diferentes archivos de GraphQL
+      const schema = await this.generateGraphQLSchema(graphqlData);
+      const resolvers = await this.generateGraphQLResolvers(graphqlData);
+      const server = await this.generateGraphQLServer(graphqlData);
+      
+      // Generar archivos adicionales específicos de GraphQL si son necesarios
+      const directives = await this._generateGraphQLDirectives(graphqlData);
+      const scalars = await this._generateGraphQLScalars(graphqlData);
+      
+      // Devolver objeto con todos los archivos generados
       return {
-        serviceName,
-        description: `Maneja eventos de ${serviceName}`,
-        verificationToken: false,
-        eventTypeField: 'type',
-        eventTypes: [
-          { name: 'Generic', type: 'event', description: 'Evento genérico' }
-        ]
+        schema,
+        resolvers,
+        server,
+        directives,
+        scalars
       };
     } catch (error) {
-      console.error(`Error al generar configuración para webhook de ${serviceName}:`, error);
+      console.error('Error al generar API GraphQL:', error);
+      throw error;
+    }
+  }
+  
+  /**
+   * Genera código para directivas personalizadas de GraphQL
+   * @param {Object} graphqlData - Datos de configuración
+   * @returns {Promise<string>} Código para directivas personalizadas
+   * @private
+   */
+  async _generateGraphQLDirectives(graphqlData) {
+    const prompt = `
+      Genera código para directivas personalizadas de GraphQL útiles para una API.
       
-      // Configuración genérica en caso de error
-      return {
-        serviceName,
-        description: `Maneja eventos de ${serviceName}`,
-        verificationToken: false,
-        eventTypeField: 'type',
-        eventTypes: [
-          { name: 'Generic', type: 'event', description: 'Evento genérico' }
-        ]
-      };
+      Ejemplos de directivas que podrías implementar:
+      - @auth - Verificar autenticación
+      - @role - Verificar rol de usuario
+      - @deprecated - Marcar campos obsoletos
+      - @length - Validar longitud de strings
+      - @date - Formatear fechas
+      
+      Incluye la definición en SDL y la implementación JavaScript.
+      Retorna SOLO el código sin explicaciones adicionales.
+    `;
+    
+    try {
+      return await this.agent.generateCode(
+        'graphql_directives',
+        prompt,
+        graphqlData
+      );
+    } catch (error) {
+      console.error('Error al generar directivas GraphQL:', error);
+      return '// No se pudieron generar directivas personalizadas';
+    }
+  }
+  
+  /**
+   * Genera código para escalares personalizados de GraphQL
+   * @param {Object} graphqlData - Datos de configuración
+   * @returns {Promise<string>} Código para escalares personalizados
+   * @private
+   */
+  async _generateGraphQLScalars(graphqlData) {
+    const prompt = `
+      Genera código para escalares personalizados de GraphQL útiles para una API.
+      
+      Ejemplos de escalares que podrías implementar:
+      - DateTime - Para manejo de fechas y horas
+      - Email - Para validar emails
+      - URL - Para validar URLs
+      - JSON - Para contenido JSON arbitrario
+      - Upload - Para cargas de archivos
+      
+      Incluye la definición en SDL y la implementación JavaScript.
+      Retorna SOLO el código sin explicaciones adicionales.
+    `;
+    
+    try {
+      return await this.agent.generateCode(
+        'graphql_scalars',
+        prompt,
+        graphqlData
+      );
+    } catch (error) {
+      console.error('Error al generar escalares GraphQL:', error);
+      return '// No se pudieron generar escalares personalizados';
     }
   }
 }

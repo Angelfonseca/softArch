@@ -1,0 +1,84 @@
+/**
+ * Resolvers GraphQL para {{projectName}}
+ * Generado automáticamente
+ */
+
+// Importar modelos
+{{#each models}}
+const {{this.name}} = require('../models/{{this.name}}');
+{{/each}}
+
+// Resolvers
+const resolvers = {
+  Query: {
+    {{#each models}}
+    // Resolvers para {{this.name}}
+    get{{this.name}}: async (_, { id }) => {
+      try {
+        return await {{this.name}}.findById(id);
+      } catch (error) {
+        throw new Error(`Error al obtener {{this.name}}: ${error.message}`);
+      }
+    },
+    getAll{{this.name}}s: async (_, { page = 1, limit = 10, filter }) => {
+      try {
+        let query = {};
+        if (filter) {
+          // Intentar parsear el filtro como JSON
+          try {
+            query = JSON.parse(filter);
+          } catch (e) {
+            // Si no es JSON válido, buscar en campos comunes
+            query = { name: { $regex: filter, $options: 'i' } };
+          }
+        }
+
+        return await {{this.name}}
+          .find(query)
+          .limit(limit)
+          .skip((page - 1) * limit);
+      } catch (error) {
+        throw new Error(`Error al obtener lista de {{this.name}}: ${error.message}`);
+      }
+    },
+    {{/each}}
+  },
+  
+  Mutation: {
+    {{#each models}}
+    // Mutaciones para {{this.name}}
+    create{{this.name}}: async (_, { input }) => {
+      try {
+        const new{{this.name}} = new {{this.name}}(input);
+        return await new{{this.name}}.save();
+      } catch (error) {
+        throw new Error(`Error al crear {{this.name}}: ${error.message}`);
+      }
+    },
+    update{{this.name}}: async (_, { id, input }) => {
+      try {
+        return await {{this.name}}.findByIdAndUpdate(
+          id,
+          input,
+          { new: true, runValidators: true }
+        );
+      } catch (error) {
+        throw new Error(`Error al actualizar {{this.name}}: ${error.message}`);
+      }
+    },
+    delete{{this.name}}: async (_, { id }) => {
+      try {
+        const result = await {{this.name}}.findByIdAndDelete(id);
+        return !!result;
+      } catch (error) {
+        throw new Error(`Error al eliminar {{this.name}}: ${error.message}`);
+      }
+    },
+    {{/each}}
+  },
+  
+  // Resolvers adicionales para relaciones entre entidades y campos computados
+  // [IA_GENERATED_CODE]
+};
+
+module.exports = resolvers;

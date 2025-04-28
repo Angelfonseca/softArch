@@ -417,6 +417,72 @@ class DeepseekAgent {
     }
   }
   
+  /**
+   * Genera recomendaciones de configuración basadas en la descripción del proyecto
+   * @param {string} description - Descripción del proyecto
+   * @param {string} prompt - Prompt para la generación de recomendaciones
+   * @returns {Promise<Object>} Objeto con las recomendaciones
+   */
+  async generateRecommendation(description, prompt) {
+    try {
+      console.log('Generando recomendaciones basadas en la descripción...');
+      
+      // Usar directamente el cliente OpenAI configurado en el constructor
+      const response = await this.client.chat.completions.create({
+        messages: [
+          { role: "system", content: "Eres un experto en arquitectura de software que proporciona recomendaciones precisas y detalladas para proyectos de desarrollo. Respondes siempre en formato JSON estructurado." },
+          { role: "user", content: prompt }
+        ],
+        model: "deepseek-chat",
+        temperature: 0.2,
+        max_tokens: 2048
+      });
+      
+      // Extraer respuesta
+      const responseText = response.choices[0].message.content;
+      
+      // Intentar extraer JSON de la respuesta
+      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        throw new Error('No se pudo extraer una respuesta JSON válida');
+      }
+      
+      // Parsear y validar JSON
+      const recommendation = JSON.parse(jsonMatch[0]);
+      
+      // Establecer valores predeterminados si faltan propiedades
+      const defaultRecommendation = {
+        database: 'MongoDB',
+        framework: 'Express',
+        auth: 'JWT',
+        includeGraphQL: false,
+        includeWebsockets: false,
+        includeGlobalQuery: false,
+        recommendations: [],
+        suggestions: []
+      };
+      
+      // Combinar con valores predeterminados
+      return { ...defaultRecommendation, ...recommendation };
+    } catch (error) {
+      console.error('Error al generar recomendaciones:', error);
+      
+      // Retornar recomendaciones predeterminadas en caso de error
+      return {
+        database: 'MongoDB',
+        framework: 'Express',
+        auth: 'JWT',
+        includeGraphQL: false,
+        includeWebsockets: false,
+        includeGlobalQuery: false,
+        recommendations: [
+          "No se pudieron obtener recomendaciones personalizadas debido a un error."
+        ],
+        suggestions: []
+      };
+    }
+  }
+  
   // Métodos privados auxiliares
   
   /**

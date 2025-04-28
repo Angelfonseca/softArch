@@ -1,0 +1,90 @@
+/**
+ * Servidor GraphQL para {{projectName}}
+ * Generado automáticamente
+ */
+
+const { ApolloServer } = require('apollo-server-express');
+const { ApolloServerPluginDrainHttpServer } = require('apollo-server-core');
+const express = require('express');
+const http = require('http');
+const mongoose = require('mongoose');
+const { readFileSync } = require('fs');
+const path = require('path');
+
+// Importar resolvers
+const resolvers = require('./resolvers');
+
+// Configuración de la base de datos
+const connectDB = async () => {
+  try {
+    await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/{{projectName}}', {
+      useNewUrlParser: true,
+      useUnifiedTopology: true
+    });
+    console.log('Conexión a MongoDB establecida');
+  } catch (error) {
+    console.error('Error al conectar con MongoDB:', error.message);
+    process.exit(1);
+  }
+};
+
+// Iniciar servidor Apollo
+async function startApolloServer() {
+  // Conectar a la base de datos
+  await connectDB();
+  
+  // Cargar el esquema
+  const typeDefs = readFileSync(path.join(__dirname, 'schema.graphql'), 'utf-8');
+  
+  // Configurar Express
+  const app = express();
+  const httpServer = http.createServer(app);
+  
+  // Crear servidor Apollo
+  const server = new ApolloServer({
+    typeDefs,
+    resolvers,
+    plugins: [ApolloServerPluginDrainHttpServer({ httpServer })],
+    formatError: (error) => {
+      console.error('Error en GraphQL:', error);
+      return {
+        message: error.message,
+        path: error.path,
+        extensions: error.extensions
+      };
+    },
+    context: ({ req }) => {
+      // Agregar contexto para autenticación y autorización
+      const token = req.headers.authorization || '';
+      // Aquí se podría verificar el token y obtener el usuario
+      // const user = getUserFromToken(token);
+      return { 
+        // user,
+        token
+      };
+    }
+  });
+  
+  // Configuraciones adicionales del servidor Apollo
+  // [IA_GENERATED_CODE]
+  
+  // Iniciar servidor
+  await server.start();
+  
+  // Aplicar middleware de Apollo a Express
+  server.applyMiddleware({ app });
+  
+  // Configurar rutas adicionales en Express
+  app.get('/health', (req, res) => {
+    res.status(200).send('OK');
+  });
+  
+  // Iniciar servidor HTTP
+  await new Promise(resolve => httpServer.listen({ port: process.env.PORT || 4000 }, resolve));
+  console.log(`🚀 Servidor listo en http://localhost:${process.env.PORT || 4000}${server.graphqlPath}`);
+  
+  return { server, app, httpServer };
+}
+
+// Exportar la función para iniciar el servidor
+module.exports = { startApolloServer };

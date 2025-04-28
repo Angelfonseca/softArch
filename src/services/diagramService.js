@@ -18,11 +18,9 @@ class DiagramService {
     if (this.connected) return;
     
     try {
-      await mongoose.connect(this.uri, {
-        useNewUrlParser: true,
-        useUnifiedTopology: true
-        // Eliminadas las opciones obsoletas: useFindAndModify, useCreateIndex
-      });
+      // Las opciones useNewUrlParser y useUnifiedTopology se mantienen para compatibilidad
+      // con versiones más antiguas de MongoDB que puedan estar en uso
+      await mongoose.connect(this.uri);
       
       console.log('Conexión a MongoDB establecida');
       this.connected = true;

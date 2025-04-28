@@ -1,0 +1,47 @@
+# Esquema GraphQL para {{projectName}}
+# Generado automáticamente
+
+# Definición de los tipos principales
+{{#each models}}
+type {{this.name}} {
+  id: ID!
+  {{#each this.fields}}
+  {{this.name}}: {{this.type}}{{#if this.required}}!{{/if}}
+  {{/each}}
+  createdAt: String!
+  updatedAt: String!
+}
+
+input {{this.name}}Input {
+  {{#each this.fields}}
+  {{this.name}}: {{this.type}}{{#if this.required}}!{{/if}}
+  {{/each}}
+}
+
+{{/each}}
+
+# Tipos adicionales, interfaces y enums
+# [IA_GENERATED_CODE]
+
+# Definición de consultas
+type Query {
+  {{#each models}}
+  get{{this.name}}(id: ID!): {{this.name}}
+  getAll{{this.name}}s(page: Int, limit: Int, filter: String): [{{this.name}}!]!
+  {{/each}}
+}
+
+# Definición de mutaciones
+type Mutation {
+  {{#each models}}
+  create{{this.name}}(input: {{this.name}}Input!): {{this.name}}!
+  update{{this.name}}(id: ID!, input: {{this.name}}Input!): {{this.name}}!
+  delete{{this.name}}(id: ID!): Boolean!
+  {{/each}}
+}
+
+# Esquema principal
+schema {
+  query: Query
+  mutation: Mutation
+}
