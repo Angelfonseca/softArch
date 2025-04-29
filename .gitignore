@@ -1,9 +1,11 @@
 node_modules
+output
+saved-projects
 dist
 coverage
 .vscode
 *.log
-*.env
+.env
 *.tsbuildinfo
 *.tgz
 *.zip

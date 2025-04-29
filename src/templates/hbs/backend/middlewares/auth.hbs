@@ -1,0 +1,62 @@
+const jwt = require('jsonwebtoken');
+
+/**
+ * Middleware de autenticación para verificar tokens JWT
+ * @param {Object} req - Request de Express
+ * @param {Object} res - Response de Express
+ * @param {Function} next - Función next de Express
+ */
+const authenticate = (req, res, next) => {
+  try {
+    const authHeader = req.headers.authorization;
+    
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ 
+        message: 'Acceso denegado. Token no proporcionado o formato inválido' 
+      });
+    }
+
+    const token = authHeader.split(' ')[1];
+    
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = { 
+      userId: decoded.userId, 
+      role: decoded.role || 'user'
+    };
+    
+    next();
+  } catch (error) {
+    return res.status(401).json({ 
+      message: 'Token inválido o expirado',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+/**
+ * Middleware para verificar roles de usuario
+ * @param {Array} roles - Array con los roles permitidos
+ * @returns {Function} Middleware de Express
+ */
+const authorize = (roles = []) => {
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({ message: 'Usuario no autenticado' });
+    }
+    
+    const userRole = req.user.role;
+    
+    if (roles.length && !roles.includes(userRole)) {
+      return res.status(403).json({ 
+        message: 'No tiene permiso para acceder a este recurso' 
+      });
+    }
+    
+    next();
+  };
+};
+
+module.exports = {
+  authenticate,
+  authorize
+};

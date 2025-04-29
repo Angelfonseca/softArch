@@ -1,29 +1,27 @@
 const express = require('express');
 const router = express.Router();
-const {{modelName}}Controller = require('../controllers/{{controllerFileName}}');
+const {{ controllerFileName }} = require('../controllers/{{ controllerFileName }}');
 {{#if authMiddleware}}
-const { authenticate } = require('../middleware/auth');
+const { authenticate } = require('../middlewares/auth');
 {{/if}}
 
 /**
- * Rutas para {{modelName}}
+ * Rutas para {{ modelName }}
  */
 
-// Obtener todos los {{modelName}}
-router.get('/', {{#if authMiddleware}}authenticate, {{/if}}{{modelName}}Controller.getAll);
+// Obtener todos los {{ modelName }}s
+router.get('/', {{#if authMiddleware}}authenticate, {{/if}}{{ controllerFileName }}.getAll);
 
-// Obtener un {{modelName}} por ID
-router.get('/:id', {{#if authMiddleware}}authenticate, {{/if}}{{modelName}}Controller.getById);
+// Obtener un {{ modelName }} por ID
+router.get('/:id', {{#if authMiddleware}}authenticate, {{/if}}{{ controllerFileName }}.getById);
 
-// Crear un nuevo {{modelName}}
-router.post('/', {{#if authMiddleware}}authenticate, {{/if}}{{modelName}}Controller.create);
+// Crear un nuevo {{ modelName }}
+router.post('/', {{#if authMiddleware}}authenticate, {{/if}}{{ controllerFileName }}.create);
 
-// Actualizar un {{modelName}} existente
-router.put('/:id', {{#if authMiddleware}}authenticate, {{/if}}{{modelName}}Controller.update);
+// Actualizar un {{ modelName }} existente
+router.put('/:id', {{#if authMiddleware}}authenticate, {{/if}}{{ controllerFileName }}.update);
 
-// Eliminar un {{modelName}}
-router.delete('/:id', {{#if authMiddleware}}authenticate, {{/if}}{{modelName}}Controller.delete);
-
-// [IA_GENERATED_CODE]
+// Eliminar un {{ modelName }}
+router.delete('/:id', {{#if authMiddleware}}authenticate, {{/if}}{{ controllerFileName }}.delete);
 
 module.exports = router;

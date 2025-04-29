@@ -199,6 +199,133 @@ class TemplateProcessor {
   }
   
   /**
+   * Genera código adicional para un controlador
+   * @param {Object} controllerData - Datos del controlador
+   * @returns {Promise<string>} Código adicional generado
+   * @private
+   */
+  async _generateAdditionalControllerCode(controllerData) {
+    try {
+      const modelName = controllerData.modelName || 'modelo';
+      const prompt = `
+        Genera funciones adicionales útiles para un controlador de ${modelName}.
+        
+        Además de las operaciones CRUD básicas, incluye métodos para:
+        - Búsquedas avanzadas o filtradas
+        - Validaciones específicas para este modelo
+        - Funcionalidad de negocio especializada
+        - Cualquier otra función que consideres útil para un controlador de ${modelName}
+        
+        Retorna SOLO el código JavaScript (funciones adicionales) sin explicaciones.
+      `;
+      
+      return await this.agent.generateCode(
+        `controller_additional_${modelName}`,
+        prompt,
+        controllerData
+      );
+    } catch (error) {
+      console.error('Error al generar código adicional para controlador:', error);
+      return '// No se pudo generar código adicional';
+    }
+  }
+  
+  /**
+   * Genera código adicional para una ruta
+   * @param {Object} routeData - Datos de la ruta
+   * @returns {Promise<string>} Código adicional generado
+   * @private
+   */
+  async _generateAdditionalRouteCode(routeData) {
+    try {
+      const modelName = routeData.modelName || 'recurso';
+      const prompt = `
+        Genera rutas adicionales útiles para ${modelName}.
+        
+        Además de las rutas CRUD básicas, incluye endpoints para:
+        - Búsquedas por diferentes parámetros
+        - Operaciones por lotes (batch)
+        - Exportación de datos a formatos como CSV o Excel
+        - Rutas especializadas según la naturaleza de este modelo
+        
+        Retorna SOLO el código JavaScript (definiciones de rutas) sin explicaciones.
+      `;
+      
+      return await this.agent.generateCode(
+        `route_additional_${modelName}`,
+        prompt,
+        routeData
+      );
+    } catch (error) {
+      console.error('Error al generar código adicional para ruta:', error);
+      return '// No se pudo generar código adicional';
+    }
+  }
+  
+  /**
+   * Genera código adicional para la aplicación principal
+   * @param {Object} appData - Datos de la aplicación
+   * @returns {Promise<string>} Código adicional generado
+   * @private
+   */
+  async _generateAdditionalAppCode(appData) {
+    try {
+      const prompt = `
+        Genera código adicional para la configuración de la aplicación Express.
+        
+        Incluye:
+        - Configuración de seguridad (helmet, CORS, etc.)
+        - Logging avanzado
+        - Manejo de errores global
+        - Monitoreo o métricas
+        - Cualquier otra configuración útil
+        
+        Retorna SOLO el código JavaScript sin explicaciones.
+      `;
+      
+      return await this.agent.generateCode(
+        'app_additional',
+        prompt,
+        appData
+      );
+    } catch (error) {
+      console.error('Error al generar código adicional para app:', error);
+      return '// No se pudo generar código adicional';
+    }
+  }
+  
+  /**
+   * Genera código adicional para consulta global
+   * @returns {Promise<string>} Código adicional generado
+   * @private
+   */
+  async _generateAdditionalGlobalQueryCode() {
+    try {
+      const prompt = `
+        Genera código adicional para un servicio de consulta global.
+        
+        Incluye funcionalidades como:
+        - Validación avanzada de parámetros
+        - Autorización granular
+        - Filtros complejos
+        - Exportación de resultados
+        - Estadísticas o agregaciones
+        
+        Retorna SOLO el código JavaScript sin explicaciones.
+      `;
+      
+      return await this.agent.generateCode(
+        'global_query_additional',
+        prompt,
+        { isAdmin: true }
+      );
+    } catch (error) {
+      console.error('Error al generar código adicional para consulta global:', error);
+      return '// No se pudo generar código adicional';
+    }
+  }
+  
+  /**
    * Genera código para un esquema GraphQL
    * @param {Object} schemaData - Datos para generar el esquema
    * @returns {Promise<string>} Código del esquema GraphQL generado
@@ -594,6 +721,187 @@ class TemplateProcessor {
     } catch (error) {
       console.error('Error al generar escalares GraphQL:', error);
       return '// No se pudieron generar escalares personalizados';
+    }
+  }
+
+  /**
+   * Genera código para un webhook a partir de datos de plantilla
+   * @param {Object} webhookData - Datos para generar el webhook
+   * @returns {Promise<string>} Código del webhook generado
+   */
+  async generateWebhook(webhookData) {
+    try {
+      // Intentar cargar la plantilla de webhook
+      let template;
+      
+      try {
+        template = await this.loadHbsTemplate('backend', 'webhook');
+      } catch (error) {
+        console.log('Plantilla de webhook no encontrada, generando con IA');
+        // Si no existe la plantilla, generar el código completo con IA
+        return await this._generateWebhookWithAI(webhookData);
+      }
+      
+      // Procesar la plantilla
+      return TemplateProcessor.processTemplate(template, webhookData);
+    } catch (error) {
+      console.error('Error al generar webhook:', error);
+      return '// Error al generar webhook';
+    }
+  }
+  
+  /**
+   * Genera un webhook completo usando IA
+   * @param {Object} webhookData - Datos del webhook
+   * @returns {Promise<string>} Código del webhook generado
+   * @private
+   */
+  async _generateWebhookWithAI(webhookData) {
+    const service = webhookData.service || 'generic';
+    const prompt = `
+      Genera un webhook completo para ${service}.
+      
+      El webhook debe:
+      - Recibir peticiones desde ${service}
+      - Verificar firmas o tokens de seguridad cuando sea aplicable
+      - Procesar el payload recibido
+      - Realizar acciones específicas según el tipo de evento
+      - Responder adecuadamente
+      
+      Usa Express para manejar las rutas.
+      Incluye validaciones y manejo de errores.
+      Retorna SOLO el código JavaScript sin explicaciones adicionales.
+    `;
+    
+    try {
+      return await this.agent.generateCode(
+        `webhook_${service.toLowerCase().replace(/\s+/g, '_')}`,
+        prompt,
+        webhookData
+      );
+    } catch (error) {
+      console.error(`Error al generar webhook para ${service} con IA:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Genera código completo para un archivo usando IA
+   * @param {string} filePath - Ruta del archivo a generar
+   * @param {string} description - Descripción del archivo
+   * @param {Object} context - Contexto del proyecto
+   * @returns {Promise<string>} Código generado
+   */
+  async generateCompleteFile(filePath, description, context) {
+    try {
+      console.log(`   Generando código para ${filePath}...`);
+      
+      // Determinar tipo de archivo basado en extensión
+      const fileExtension = path.extname(filePath).toLowerCase();
+      let fileType = 'javascript';
+      
+      switch (fileExtension) {
+        case '.js': fileType = 'javascript'; break;
+        case '.ts': fileType = 'typescript'; break;
+        case '.py': fileType = 'python'; break;
+        case '.json': fileType = 'json'; break;
+        case '.md': fileType = 'markdown'; break;
+        case '.css': fileType = 'css'; break;
+        case '.html': fileType = 'html'; break;
+        case '.env': fileType = 'env'; break;
+        case '.yml':
+        case '.yaml': fileType = 'yaml'; break;
+        default: fileType = 'javascript';
+      }
+      
+      // Crear contexto enriquecido para el agente
+      const enrichedContext = {
+        ...context,
+        file: {
+          path: filePath,
+          type: fileType,
+          name: path.basename(filePath),
+          description
+        }
+      };
+      
+      // Crear prompt específico según el tipo de archivo
+      let prompt;
+      
+      if (fileType === 'env') {
+        prompt = `
+          Genera un archivo .env.example para un proyecto de backend con estas características:
+          - Base de datos: ${context.database || 'MongoDB'}
+          - Framework: ${context.framework || 'Express'}
+          - Autenticación: ${context.auth || 'JWT'}
+          
+          Incluye todas las variables de entorno necesarias con valores de ejemplo.
+          NO incluyas secretos reales ni credenciales.
+          Añade comentarios explicativos para cada variable.
+          
+          Retorna SOLO el contenido del archivo sin explicaciones adicionales.
+        `;
+      } else if (filePath.endsWith('README.md')) {
+        prompt = `
+          Genera un README.md completo para un proyecto de backend con estas características:
+          - Descripción: ${context.description || 'API REST'}
+          - Base de datos: ${context.database || 'MongoDB'}
+          - Framework: ${context.framework || 'Express'}
+          
+          El README debe incluir:
+          - Título y descripción del proyecto
+          - Requisitos previos
+          - Instrucciones de instalación
+          - Configuración del entorno
+          - Uso de la API con ejemplos
+          - Estructura del proyecto
+          - Endpoints disponibles
+          - Modelos principales
+          
+          Usa un formato atractivo con markdown.
+          Retorna SOLO el contenido del archivo sin explicaciones adicionales.
+        `;
+      } else if (filePath.includes('package.json')) {
+        prompt = `
+          Genera un package.json completo para un proyecto de backend con estas características:
+          - Nombre: ${context.projectName || path.basename(path.dirname(filePath))}
+          - Base de datos: ${context.database || 'MongoDB'}
+          - Framework: ${context.framework || 'Express'}
+          
+          Incluye todas las dependencias necesarias con versiones actualizadas y compatibles.
+          Añade scripts útiles para desarrollo, pruebas y producción.
+          
+          Retorna SOLO el contenido del archivo JSON válido sin explicaciones adicionales.
+        `;
+      } else {
+        prompt = `
+          Genera el código completo para un archivo ${fileType} con la siguiente descripción:
+          "${description}"
+          
+          Este archivo es parte de un proyecto con estas características:
+          - Descripción del proyecto: ${context.description || 'API REST'}
+          - Base de datos: ${context.database || 'MongoDB'}
+          - Framework: ${context.framework || 'Express'}
+          - Autenticación: ${context.auth || 'JWT'}
+          
+          La ruta del archivo es: ${filePath}
+          
+          Asegúrate de que el código sea completo, funcional y siga las mejores prácticas.
+          Añade comentarios explicativos donde sea necesario.
+          Importa las dependencias necesarias.
+          
+          Retorna SOLO el contenido del archivo, sin explicaciones adicionales.
+        `;
+      }
+      
+      // Generar código utilizando el agente de IA
+      const generatedCode = await this.agent.generateCode(filePath, prompt, enrichedContext);
+      
+      // Formatear el código según el tipo de archivo (opcional)
+      return generatedCode;
+    } catch (error) {
+      console.error(`Error al generar código para ${filePath}:`, error);
+      throw error;
     }
   }
 }

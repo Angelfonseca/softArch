@@ -175,6 +175,64 @@ class ProjectGenerator {
           console.log(`   ✓ Ruta identificada: ${routeName}`);
         }
       }
+
+      // Verificar la necesidad de middlewares comunes
+      let needsAuthMiddleware = false;
+      let needsErrorHandler = false;
+      
+      // Revisar si las rutas utilizan middleware de autenticación
+      for (const file of architecture.files) {
+        if (this._getFileTypeFromPath(file.path) === 'route' && options.auth !== 'none') {
+          needsAuthMiddleware = true;
+          break;
+        }
+      }
+
+      // Siempre incluir un middleware de manejo de errores
+      needsErrorHandler = true;
+      
+      // Añadir middlewares necesarios si no están incluidos en la arquitectura
+      const middlewarePath = path.join('middlewares');
+      
+      // Verificar y añadir middleware de autenticación si es necesario
+      if (needsAuthMiddleware) {
+        let authMiddlewareExists = false;
+        for (const file of architecture.files) {
+          if (file.path.includes('/middlewares/auth.js')) {
+            authMiddlewareExists = true;
+            break;
+          }
+        }
+        
+        if (!authMiddlewareExists) {
+          console.log('\n🔄 Añadiendo middleware de autenticación...');
+          const authMiddlewarePath = path.join(middlewarePath, 'auth.js');
+          architecture.files.push({
+            path: authMiddlewarePath,
+            description: 'Middleware de autenticación para verificar tokens JWT y permisos de usuario'
+          });
+        }
+      }
+      
+      // Verificar y añadir middleware de manejo de errores si es necesario
+      if (needsErrorHandler) {
+        let errorHandlerExists = false;
+        for (const file of architecture.files) {
+          if (file.path.includes('/middlewares/errorHandler.js')) {
+            errorHandlerExists = true;
+            break;
+          }
+        }
+        
+        if (!errorHandlerExists) {
+          console.log('\n🔄 Añadiendo middleware de manejo de errores...');
+          const errorHandlerPath = path.join(middlewarePath, 'errorHandler.js');
+          architecture.files.push({
+            path: errorHandlerPath,
+            description: 'Middleware para el manejo centralizado de errores y excepciones'
+          });
+        }
+      }
       
       // Añadir globalQuery si está habilitado
       if (options.includeGlobalQuery) {
@@ -196,6 +254,12 @@ class ProjectGenerator {
           routes.push({
             path: 'global-query',
             file: 'globalQuery'
+          });
+          
+          // Añadir a la arquitectura
+          architecture.files.push({
+            path: globalQueryPath,
+            description: 'Servicio de consulta global para administradores'
           });
           
           // Generar el archivo de globalQuery
@@ -274,6 +338,24 @@ class ProjectGenerator {
           console.log('   Generando archivo de consulta global...');
           code = await this.templateProcessor.generateGlobalQuery();
           
+        } else if (fileType === 'middleware' && fileName === 'auth') {
+          // Para middleware de autenticación, usar la plantilla específica
+          console.log('   Generando middleware de autenticación...');
+          try {
+            const template = await this.templateProcessor.loadHbsTemplate('backend/middlewares', 'auth');
+            code = TemplateProcessor.processTemplate(template, {
+              authType: options.auth || 'JWT'
+            });
+          } catch (error) {
+            console.log('   No se encontró plantilla para middleware de autenticación, generando con IA...');
+            code = await this.templateProcessor.generateCompleteFile(file.path, file.description, context);
+          }
+          
+        } else if (fileType === 'middleware' && fileName === 'errorHandler') {
+          // Para middleware de manejo de errores, usar la plantilla específica o generar con IA
+          console.log('   Generando middleware de manejo de errores...');
+          code = await this.templateProcessor.generateCompleteFile(file.path, file.description, context);
+          
         } else {
           // Para otros archivos, generar completamente con IA
           console.log('   Generando código con IA...');
@@ -320,6 +402,226 @@ class ProjectGenerator {
     } catch (error) {
       console.error('\n❌ Error al generar el backend:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Determina el tipo de archivo a partir de su ruta
+   * @param {string} filePath - Ruta del archivo
+   * @returns {string|null} - Tipo de archivo (model, controller, route) o null si no se puede determinar
+   * @private
+   */
+  _getFileTypeFromPath(filePath) {
+    // Normalizar la ruta para manejar separadores de forma consistente
+    const normalizedPath = filePath.replace(/\\/g, '/');
+    
+    // Verificar el directorio que contiene el archivo
+    if (normalizedPath.includes('/models/')) {
+      return 'model';
+    } else if (normalizedPath.includes('/controllers/')) {
+      return 'controller';
+    } else if (normalizedPath.includes('/routes/')) {
+      return 'route';
+    } else if (normalizedPath.includes('/middlewares/')) {
+      return 'middleware';
+    } else if (normalizedPath.includes('/config/')) {
+      return 'config';
+    } else if (normalizedPath.includes('/services/')) {
+      return 'service';
+    } else if (normalizedPath.includes('/utils/')) {
+      return 'util';
+    }
+    
+    // Si no se pudo determinar por el directorio, verificar el nombre del archivo
+    const fileName = path.basename(normalizedPath, path.extname(normalizedPath));
+    
+    if (fileName.endsWith('Model')) {
+      return 'model';
+    } else if (fileName.endsWith('Controller')) {
+      return 'controller';
+    } else if (fileName.endsWith('Route') || fileName.endsWith('Router')) {
+      return 'route';
+    } else if (fileName.endsWith('Middleware')) {
+      return 'middleware';
+    } else if (fileName.endsWith('Service')) {
+      return 'service';
+    } else if (fileName === 'app') {
+      return 'app';
+    } else if (fileName === 'index') {
+      // Determinar por el directorio que contiene el index.js
+      const dirName = path.dirname(normalizedPath).split('/').pop();
+      if (dirName === 'models') {
+        return 'model';
+      } else if (dirName === 'controllers') {
+        return 'controller';
+      } else if (dirName === 'routes') {
+        return 'route';
+      } else if (dirName === 'middlewares') {
+        return 'middleware';
+      }
+    }
+    
+    return null;
+  }
+
+  /**
+   * Extrae el nombre del modelo a partir de la ruta del archivo
+   * @param {string} filePath - Ruta del archivo
+   * @returns {string} - Nombre del modelo en PascalCase
+   * @private
+   */
+  _getModelNameFromPath(filePath) {
+    // Obtener el nombre de archivo sin extensión
+    const fileName = path.basename(filePath, path.extname(filePath));
+    
+    // Si termina en Model, quitarlo
+    let modelName = fileName.endsWith('Model') ? 
+      fileName.substring(0, fileName.length - 'Model'.length) : 
+      fileName;
+    
+    // Convertir a PascalCase (primera letra mayúscula)
+    if (modelName.length > 0) {
+      modelName = modelName.charAt(0).toUpperCase() + modelName.slice(1);
+    }
+    
+    return modelName;
+  }
+
+  /**
+   * Obtiene el nombre de archivo del modelo (sin extensión) a partir de la ruta
+   * @param {string} filePath - Ruta del archivo
+   * @returns {string} - Nombre de archivo del modelo sin extensión
+   * @private
+   */
+  _getModelFileNameFromPath(filePath) {
+    // Obtener el nombre de archivo sin extensión
+    return path.basename(filePath, path.extname(filePath));
+  }
+
+  /**
+   * Genera campos para un modelo basado en la descripción
+   * @param {string} description - Descripción del modelo
+   * @param {Object} context - Contexto del proyecto
+   * @returns {Promise<Array>} - Array de campos para el modelo
+   * @private
+   */
+  async _generateModelFields(description, context) {
+    try {
+      // Crear un prompt para generar los campos del modelo
+      const prompt = `
+        Basándote en esta descripción: "${description}"
+        
+        Genera un array de campos para un modelo de Mongoose. Cada campo debe ser un objeto con las siguientes propiedades:
+        - name: nombre del campo
+        - type: tipo del campo en Mongoose (String, Number, Boolean, Date, Schema.Types.ObjectId, etc.)
+        - required: si el campo es requerido (true/false)
+        - ref: nombre del modelo al que hace referencia (solo para ObjectId)
+        
+        Por ejemplo:
+        [
+          { "name": "nombre", "type": "String", "required": true },
+          { "name": "edad", "type": "Number", "required": true },
+          { "name": "createdAt", "type": "Date", "required": false, "default": "Date.now" },
+          { "name": "usuario", "type": "Schema.Types.ObjectId", "ref": "Usuario", "required": true }
+        ]
+        
+        IMPORTANTE: Para valores por defecto como Date.now, devuélvelos como strings entre comillas.
+        
+        Devuelve solo el array JSON sin ninguna explicación adicional.
+      `;
+      
+      // Usar el agente para generar los campos
+      const fieldsJsonString = await this.agent.generateCode(
+        'model_fields', 
+        prompt, 
+        context
+      );
+      
+      // Extraer el array JSON de la respuesta
+      const jsonMatch = fieldsJsonString.match(/\[[\s\S]*\]/);
+      if (jsonMatch) {
+        // Convertir el string del array JSON a un objeto JavaScript
+        let fieldsArray = JSON.parse(jsonMatch[0]);
+        
+        // Procesar los campos para manejar correctamente valores especiales como Date.now
+        fieldsArray = fieldsArray.map(field => {
+          // Si hay un valor por defecto que es un string "Date.now", convertirlo a la función real
+          if (field.default === "Date.now") {
+            field.default = Date.now;
+          }
+          return field;
+        });
+        
+        return fieldsArray;
+      }
+      
+      // Si no se encuentra un array JSON, devolver campos predeterminados
+      return [
+        { name: "nombre", type: "String", required: true },
+        { name: "descripcion", type: "String", required: false },
+        { name: "createdAt", type: "Date", required: false, default: Date.now }
+      ];
+    } catch (error) {
+      console.error('Error al generar campos del modelo:', error);
+      // Devolver campos básicos por defecto
+      return [
+        { name: "nombre", type: "String", required: true },
+        { name: "descripcion", type: "String", required: false },
+        { name: "createdAt", type: "Date", required: false, default: Date.now }
+      ];
+    }
+  }
+
+  /**
+   * Genera métodos para un modelo basado en la descripción
+   * @param {string} description - Descripción del modelo
+   * @param {Object} context - Contexto del proyecto
+   * @returns {Promise<Array>} - Array de métodos para el modelo
+   * @private
+   */
+  async _generateModelMethods(description, context) {
+    try {
+      // Crear un prompt para generar los métodos del modelo
+      const prompt = `
+        Basándote en esta descripción: "${description}"
+        
+        Genera un array de métodos para un modelo de Mongoose. Cada método debe ser un objeto con las siguientes propiedades:
+        - name: nombre del método
+        - code: código del método (como string)
+        - description: descripción breve de lo que hace el método
+        
+        Por ejemplo:
+        [
+          {
+            "name": "findByName",
+            "code": "return this.model('Usuario').find({ nombre: new RegExp(name, 'i') });",
+            "description": "Busca usuarios por nombre (case insensitive)"
+          }
+        ]
+        
+        Devuelve solo el array JSON sin ninguna explicación adicional.
+      `;
+      
+      // Usar el agente para generar los métodos
+      const methodsJsonString = await this.agent.generateCode(
+        'model_methods', 
+        prompt, 
+        context
+      );
+      
+      // Extraer el array JSON de la respuesta
+      const jsonMatch = methodsJsonString.match(/\[[\s\S]*\]/);
+      if (jsonMatch) {
+        // Parsear los métodos
+        return JSON.parse(jsonMatch[0]);
+      }
+      
+      // Si no se encuentra un array JSON, devolver un array vacío
+      return [];
+    } catch (error) {
+      console.error('Error al generar métodos del modelo:', error);
+      // Devolver array vacío por defecto
+      return [];
     }
   }
 
